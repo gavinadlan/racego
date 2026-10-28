@@ -3,10 +3,12 @@
 //	go run ./cmd/migrate up     # terapkan migrasi *.up.sql yang belum dijalankan
 //	go run ./cmd/migrate seed   # isi data contoh (migrations/seed.sql)
 //	go run ./cmd/migrate reset  # jalankan semua *.down.sql (HAPUS data!)
+//	go run ./cmd/migrate grant <email> <org-slug> <role>  # jadikan akun anggota mitra
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -14,16 +16,18 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/platform"
+	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/migrations"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("pemakaian: migrate up|seed|reset")
+		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>")
 	}
 	ctx := context.Background()
 	cfg := config.Load()
@@ -46,6 +50,11 @@ func main() {
 			log.Fatal("reset hanya diizinkan di APP_ENV=development")
 		}
 		err = reset(ctx, db)
+	case "grant":
+		if len(os.Args) != 5 {
+			log.Fatal("pemakaian: migrate grant <email> <org-slug> <owner|admin|finance|rpc_staff>")
+		}
+		err = grant(ctx, db, os.Args[2], os.Args[3], tenant.Role(os.Args[4]))
 	default:
 		err = fmt.Errorf("perintah tidak dikenal: %s", os.Args[1])
 	}
@@ -141,4 +150,37 @@ func list(suffix string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// grant menjadikan akun (yang sudah pernah login) anggota mitra dengan peran tertentu.
+func grant(ctx context.Context, db *pgxpool.Pool, email, slug string, role tenant.Role) error {
+	switch role {
+	case tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleFinance, tenant.RoleRPCStaff:
+	default:
+		return fmt.Errorf("peran %q tidak valid; pilih owner, admin, finance, atau rpc_staff", role)
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	var userID, orgID string
+	var userName, orgName string
+	err := db.QueryRow(ctx, `SELECT id::text, name FROM users WHERE email = $1`, email).Scan(&userID, &userName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("akun %s belum ada; masuk dulu sekali di web dengan email itu", email)
+	}
+	if err != nil {
+		return err
+	}
+	err = db.QueryRow(ctx, `SELECT id::text, name FROM organizations WHERE slug = $1`, slug).Scan(&orgID, &orgName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("mitra dengan slug %q tidak ditemukan", slug)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, $3)
+		ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role`, orgID, userID, string(role)); err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s (%s) sekarang %s di %s\n", userName, email, role, orgName)
+	return nil
 }

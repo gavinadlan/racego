@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense } from "react";
-import { DEV_USERS } from "@/lib/format";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { DEV_LOGIN } from "@/lib/api";
+import { DEV_USERS, initials } from "@/lib/format";
+import { LoginLink } from "./login-link";
 import { useSession } from "./session";
+import { btnDark } from "./ui";
 
 /** Logo: BIB mini dengan dua lubang peniti + wordmark. */
 export function Logo({ light = false }: { light?: boolean }) {
@@ -30,23 +33,12 @@ const NAV = [
  * (syarat Next 16 dengan cacheComponents) supaya header tetap ikut prerender.
  */
 function NavLinks({ active }: { active: (href: string) => boolean }) {
-  const { userId, me } = useSession();
   const link = (href: string) => `whitespace-nowrap hover:text-asphalt ${active(href) ? "text-asphalt font-semibold" : "text-muted"}`;
   return (
     <>
       {NAV.map((n) => (
         <Link key={n.href} href={n.href} className={link(n.href)}>
           {n.label}
-        </Link>
-      ))}
-      {userId && (
-        <Link href="/tickets" className={link("/tickets")}>
-          Tiket saya
-        </Link>
-      )}
-      {me?.orgs.map((o) => (
-        <Link key={o.slug} href={`/org/${o.slug}`} className={link(`/org/${o.slug}`)}>
-          Dashboard {o.name}
         </Link>
       ))}
     </>
@@ -58,8 +50,106 @@ function ActiveNavLinks() {
   return <NavLinks active={(href) => path.startsWith(href)} />;
 }
 
+/** Tombol inisial + menu akun. Pola disclosure: Tab menelusuri tautan, Escape/klik di luar menutup. */
+function AccountMenu() {
+  const { me, logout } = useSession();
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      button.current?.focus();
+    };
+    const onFocus = (e: FocusEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+    };
+  }, [open]);
+
+  if (!me) return null;
+  const item = "block w-full px-4 py-2 text-left text-sm hover:bg-paper focus:bg-paper focus:outline-none";
+  const close = () => setOpen(false);
+  return (
+    <div ref={root} className="relative">
+      <button
+        ref={button}
+        type="button"
+        aria-expanded={open}
+        aria-controls="account-menu"
+        aria-label={`Menu akun ${me.name}`}
+        onClick={() => setOpen((o) => !o)}
+        className="font-display flex size-10 items-center justify-center rounded-full bg-asphalt text-lg font-bold text-white hover:bg-road focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hivis"
+      >
+        {initials(me.name) || me.email[0].toUpperCase()}
+      </button>
+      {open && (
+        <div id="account-menu" className="absolute right-0 z-40 mt-2 w-64 overflow-hidden rounded-md border border-line bg-card py-1 shadow-lg">
+          <p className="truncate border-b border-line px-4 pt-2 pb-3 text-xs text-muted">
+            <span className="block truncate text-sm font-semibold text-asphalt">{me.name}</span>
+            {me.email}
+          </p>
+          <Link href="/tickets" className={item} onClick={close}>
+            Tiket saya
+          </Link>
+          {me.orgs.map((o) => (
+            <Link key={o.slug} href={`/org/${o.slug}`} className={item} onClick={close}>
+              Dashboard {o.name}
+            </Link>
+          ))}
+          <Link href="/akun" className={item} onClick={close}>
+            Akun
+          </Link>
+          <button
+            type="button"
+            className={`${item} border-t border-line`}
+            onClick={async () => {
+              close();
+              await logout();
+            }}
+          >
+            Keluar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DevPicker() {
+  const { ready, me, switchUser } = useSession();
+  const devIds: readonly string[] = DEV_USERS.map((u) => u.id);
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted">
+      <span className="rounded-sm bg-asphalt px-1.5 py-0.5 font-semibold whitespace-nowrap text-white">Akun contoh (dev)</span>
+      <select
+        className="max-w-36 rounded-md border border-line bg-card px-2 py-1.5 text-sm text-asphalt"
+        value={ready && me && devIds.includes(me.id) ? me.id : ""}
+        onChange={(e) => switchUser(e.target.value || null)}
+        aria-label="Masuk sebagai akun contoh (dev)"
+      >
+        <option value="">Tidak dipakai</option>
+        {DEV_USERS.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function Header() {
-  const { ready, userId, switchUser } = useSession();
+  const { ready, me } = useSession();
 
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-paper/95 backdrop-blur">
@@ -72,22 +162,16 @@ export function Header() {
             <ActiveNavLinks />
           </Suspense>
         </nav>
-        <label className="ml-auto flex items-center gap-2 text-xs text-muted">
-          <span className="rounded-sm bg-asphalt px-1.5 py-0.5 font-semibold text-white">Dev</span>
-          <select
-            className="max-w-44 rounded-md border border-line bg-card px-2 py-1.5 text-sm text-asphalt"
-            value={ready ? (userId ?? "") : ""}
-            onChange={(e) => switchUser(e.target.value || null)}
-            aria-label="Masuk sebagai akun contoh"
-          >
-            <option value="">Belum masuk</option>
-            {DEV_USERS.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="ml-auto flex items-center gap-3">
+          {DEV_LOGIN && <DevPicker />}
+          {!ready ? (
+            <span className="size-10" aria-hidden />
+          ) : me ? (
+            <AccountMenu />
+          ) : (
+            <LoginLink className={btnDark}>Masuk</LoginLink>
+          )}
+        </div>
       </div>
     </header>
   );

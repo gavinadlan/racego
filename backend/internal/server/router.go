@@ -15,6 +15,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/event"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
+	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
@@ -27,6 +28,7 @@ type Deps struct {
 	Inv    *checkout.Inventory
 	Snap   payment.SnapClient
 	Signer *ticket.Signer
+	Mailer *notify.Mailer
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -37,12 +39,14 @@ func NewRouter(d Deps) http.Handler {
 		co.SetRefresher(payment.NewReconciler(pay, d.Cfg.MidtransServerKey, d.Cfg.MidtransIsProduction))
 	}
 	tickets := ticket.NewHandler(d.DB, d.Signer)
+	sessions := auth.NewSessionStore(d.DB)
+	authH := auth.NewHandler(d.DB, auth.NewOTPStore(d.Redis), sessions, d.Mailer, d.Cfg.IsDev())
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
+	r.Use(middleware.RequestID, realIP(d.Cfg.TrustedProxyHops), middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
 	r.Use(cors(d.Cfg.FrontendURL))
-	r.Use(auth.Middleware(d.Cfg.IsDev()))
+	r.Use(auth.Middleware(sessions.Lookup, d.Cfg.FrontendURL, d.Cfg.IsDev()))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := d.DB.Ping(r.Context()); err != nil {
@@ -65,11 +69,16 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/organizers/{slug}", events.Organizer)
 		r.Get("/qr/public-key", tickets.PublicKey)
 		r.Post("/webhooks/midtrans", pay.WebhookHandler)
+		r.Post("/auth/otp/request", authH.RequestOTP)
+		r.Post("/auth/otp/verify", authH.VerifyOTP)
+		r.Post("/auth/logout", authH.Logout)
+		r.Get("/auth/session", authH.Session)
 
 		// Pelari (wajib login)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Require)
-			r.Get("/me", events.Me)
+			r.Get("/me", authH.Me)
+			r.Patch("/me", authH.UpdateMe)
 			r.Get("/me/tickets", tickets.MyTickets)
 			r.Post("/categories/{categoryID}/reservations", co.Reserve)
 			r.Post("/orders", co.CreateOrder)
@@ -101,6 +110,7 @@ func cors(origin string) func(http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Set("Vary", "Origin")
+			h.Set("Access-Control-Allow-Credentials", "true")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key, X-User-ID")
 			if r.Method == http.MethodOptions {

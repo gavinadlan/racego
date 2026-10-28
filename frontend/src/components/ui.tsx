@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LoginLink } from "./login-link";
 
 export function ErrorBox({ message }: { message: string }) {
   return <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{message}</div>;
@@ -10,8 +11,11 @@ export function Loading({ label = "Memuat…" }: { label?: string }) {
 
 export function LoginHint() {
   return (
-    <div className="rounded-md border border-dashed border-line bg-card p-6 text-sm text-muted">
-      Pilih akun contoh di menu <b className="text-asphalt">Dev</b> (kanan atas) untuk masuk. Login dengan OTP atau Google belum dibuat.
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-dashed border-line bg-card p-6 text-sm">
+      <p className="text-muted">
+        <b className="text-asphalt">Masuk dulu untuk melanjutkan.</b> Cukup pakai email, kami kirim kode 6 digit. Belum punya akun? Akun dibuat otomatis.
+      </p>
+      <LoginLink className={btnDark}>Masuk</LoginLink>
     </div>
   );
 }

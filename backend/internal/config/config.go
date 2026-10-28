@@ -11,6 +11,8 @@ type Config struct {
 	Env         string
 	HTTPAddr    string
 	FrontendURL string
+	// TrustedProxyHops: jumlah proxy tepercaya di depan API (0 = langsung terekspos, header IP diabaikan).
+	TrustedProxyHops int
 
 	DatabaseURL   string
 	RedisAddr     string
@@ -36,6 +38,7 @@ func Load() Config {
 		Env:                  get("APP_ENV", "development"),
 		HTTPAddr:             get("HTTP_ADDR", ":8080"),
 		FrontendURL:          get("FRONTEND_URL", "http://localhost:3000"),
+		TrustedProxyHops:     getInt("TRUSTED_PROXY_HOPS", 0),
 		DatabaseURL:          get("DATABASE_URL", "postgres://racego:racego@localhost:55432/racego?sslmode=disable"),
 		RedisAddr:            get("REDIS_ADDR", "localhost:6380"),
 		RedisPassword:        os.Getenv("REDIS_PASSWORD"),
@@ -72,6 +75,13 @@ func get(key, def string) string {
 
 func getBool(key string, def bool) bool {
 	if v, err := strconv.ParseBool(os.Getenv(key)); err == nil {
+		return v
+	}
+	return def
+}
+
+func getInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil {
 		return v
 	}
 	return def

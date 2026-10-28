@@ -3,10 +3,15 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 const USER_KEY = "racego.devUser";
+export const DEV_USER_EVENT = "racego:user-change";
 
-// SEMENTARA (development): identitas dikirim lewat header X-User-ID dari pemilih user dev.
-// Ganti dengan token login sungguhan sebelum aplikasi dibuka ke publik.
+/** Pemilih akun contoh hanya aktif bila NEXT_PUBLIC_DEV_LOGIN=true (development). */
+export const DEV_LOGIN = process.env.NEXT_PUBLIC_DEV_LOGIN === "true";
+
+// Akun contoh (development): identitas dikirim lewat header X-User-ID, hanya diterima backend
+// saat APP_ENV=development. Login sungguhan memakai cookie sesi HttpOnly dari /v1/auth/otp/verify.
 export function getDevUserId(): string | null {
+  if (!DEV_LOGIN) return null;
   try {
     return window.localStorage.getItem(USER_KEY);
   } catch {
@@ -21,6 +26,7 @@ export function setDevUserId(id: string | null) {
   } catch {
     /* localStorage bisa tidak tersedia (mode privat) */
   }
+  window.dispatchEvent(new Event(DEV_USER_EVENT));
 }
 
 export class ApiError extends Error {
@@ -28,6 +34,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public retryAfter?: number,
   ) {
     super(message);
   }
@@ -49,13 +56,15 @@ export async function apiFetch<T>(
       headers,
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
       cache: "no-store",
+      credentials: "include",
     });
   } catch {
     throw new ApiError(0, "network", "Tidak bisa terhubung ke server. Pastikan backend berjalan (make api).");
   }
+  if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(res.status, data.error ?? "unknown", data.message ?? `Error ${res.status}`);
+    throw new ApiError(res.status, data.error ?? "unknown", data.message ?? `Error ${res.status}`, data.retry_after);
   }
   return data as T;
 }
@@ -172,6 +181,7 @@ export type Me = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   orgs: { slug: string; name: string; role: string }[];
 };
 
@@ -203,3 +213,21 @@ export type ScanResult = {
   message: string;
   ticket?: ScanTicket;
 };
+
+// ===== Login (email + kode OTP) =====
+
+export const requestOtp = (email: string) =>
+  apiFetch<{ ok: true; resend_after: number }>("/v1/auth/otp/request", { method: "POST", body: { email } });
+
+export const verifyOtp = (email: string, code: string) =>
+  apiFetch<Me & { is_new: boolean }>("/v1/auth/otp/verify", { method: "POST", body: { email, code } });
+
+export const logout = () => apiFetch<void>("/v1/auth/logout", { method: "POST" });
+
+export const updateMe = (body: { name: string; phone: string }) => apiFetch<Me>("/v1/me", { method: "PATCH", body });
+
+/** Tujuan setelah login: hanya path relatif di situs ini (cegah open redirect). */
+export function safeNext(next: string | null | undefined): string {
+  const ok = next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") && !next.startsWith("/masuk");
+  return ok ? next : "/";
+}

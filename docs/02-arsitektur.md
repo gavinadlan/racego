@@ -36,10 +36,10 @@ flowchart TB
 | `ticket` | Tanda tangan QR Ed25519, penerbitan tiket + BIB, scan race pack |
 | `ledger` | Jurnal double-entry, fee platform, estimasi biaya PG |
 | `tenant` | Middleware multi-tenant: slug mitra → `org_id` + cek peran |
-| `event` | Katalog publik, dashboard mitra, profil `/me` |
+| `event` | Katalog publik, dashboard mitra |
 | `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order) |
-| `auth` | Identitas user (sementara: header `X-User-ID` di development) |
-| `notify` | Email tiket |
+| `auth` | Login email + OTP, sesi cookie, profil `/me`, middleware identitas & CSRF |
+| `notify` | Email tiket & kode masuk (SMTP, batas waktu 10 detik) |
 
 Aturan dependensi: modul boleh saling impor ke arah "bawah" saja (`checkout` → `ledger`, `payment`), tidak melingkar. Ini membuat modul bisa dipecah jadi layanan terpisah nanti tanpa menulis ulang.
 
@@ -49,6 +49,15 @@ Aturan dependensi: modul boleh saling impor ke arah "bawah" saja (`checkout` →
 2. **Order** — reservasi + data peserta disimpan sebagai order `pending` di Postgres (idempotent lewat header `Idempotency-Key`), lalu token Snap dibuat.
 3. **Webhook** — Midtrans memanggil `/v1/webhooks/midtrans`. Signature diverifikasi, event dicatat unik per `(order, status)`, status order hanya bergerak maju, dan pesan `order.paid` ditulis ke tabel `outbox` **dalam transaksi yang sama**.
 4. **Worker** — mengambil pesan outbox (`FOR UPDATE SKIP LOCKED`), mengunci slot di Redis, menerbitkan tiket, menulis jurnal ledger, lalu mengantrekan email. Setiap langkah idempotent; gagal → retry dengan backoff.
+
+## Login & sesi
+
+- **Tanpa password**: email → kode 6 digit dikirim langsung dari API (`notify.Mailer`) → verifikasi → masuk. Akun dibuat otomatis saat verifikasi pertama.
+- **Kode OTP di Redis**: key `otp:{email}` berisi SHA-256 dari `kode + email` dan jumlah percobaan salah, TTL 10 menit, dibandingkan dengan `subtle.ConstantTimeCompare`, hangus setelah 5× salah atau sekali berhasil. Batas kirim (INCR + EXPIRE): 60 detik antar kirim & 5/jam per email, 20/jam per IP.
+- **Sesi di Postgres** (tabel `sessions`): token acak 32 byte hanya ada di cookie `racego_session` (HttpOnly, `SameSite=Lax`, host-only, 30 hari, `Secure` di luar development); DB hanya menyimpan SHA-256-nya. `last_seen_at` diperbarui paling sering 5 menit sekali. Bukan JWT: sesi bisa dicabut seketika (logout menghapus barisnya).
+- **Middleware** (`auth.Middleware`): cookie sesi valid → user; bila tidak ada dan `APP_ENV=development` → header `X-User-ID` (akun contoh). Di luar development header itu diabaikan.
+- **CSRF**: `SameSite=Lax` + tolak request yang mengubah data bila `Origin` bukan `FRONTEND_URL` (403 `bad_origin`).
+- **Peran mitra** untuk akun sungguhan diberikan dengan `make grant` (lihat [08-development.md](08-development.md)); halaman pendaftaran mitra belum ada.
 
 ## Multi-tenancy
 

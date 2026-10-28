@@ -31,7 +31,9 @@ make seed      # isi data contoh: 5 penyelenggara, 17 event, 4 user
 make dev       # jalankan API (:8080) + worker + web (:3000)
 ```
 
-Buka http://localhost:3000 lalu pilih akun contoh di menu **Dev** (kanan atas):
+Buka http://localhost:3000 lalu klik **Masuk**: isi email, kode 6 digit muncul di log `make dev` (dan di Mailpit/Gmail). Jadikan akunmu staf/owner mitra dengan `make grant EMAIL=kamu@gmail.com ORG=jakarta-runners ROLE=owner`.
+
+Atau pakai akun contoh di menu **Akun contoh (dev)** (kanan atas):
 
 | User | Peran | Coba ini |
 | --- | --- | --- |
@@ -48,6 +50,7 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | --- | --- |
 | `make test` | Tes backend (termasuk 1.000 pembeli berebut 50 slot → tepat 50 sukses) + lint & type-check frontend |
 | `make db-reset` | Hapus semua data lalu migrasi + seed ulang |
+| `make grant EMAIL=… ORG=… ROLE=…` | Beri akun sungguhan peran di penyelenggara |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
 | `make loadtest` | Uji beban war tiket dengan k6 |
 
@@ -55,7 +58,8 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 
 | Sudah jalan | Belum (lihat [docs/09-roadmap.md](docs/09-roadmap.md)) |
 | --- | --- |
-| Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | Login OTP/Google (sekarang: pemilih user dev) |
+| Login email + kode OTP, sesi cookie, halaman akun | Login Google |
+| Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | |
 | Kalender bulanan & daftar, arsip race, halaman penyelenggara | Upload poster event |
 | Multi-tenant (mitra, peran, isolasi data) | |
 | Reservasi atomik Redis + timer + pengembalian kuota | Waiting room / antrian virtual |

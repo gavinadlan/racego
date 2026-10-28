@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/gavinadlan/racego/backend/internal/auth"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 )
@@ -55,33 +54,4 @@ func (h *Handler) OrgEvents(w http.ResponseWriter, r *http.Request) {
 		"org":    map[string]any{"slug": m.OrgSlug, "name": m.OrgName, "role": m.Role},
 		"events": list,
 	})
-}
-
-type Membership struct {
-	Slug string `json:"slug"`
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
-// Me: GET /v1/me — profil singkat + daftar mitra tempat user menjadi anggota.
-func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserID(r.Context())
-	var name, email string
-	if err := h.db.QueryRow(r.Context(), `SELECT name, email FROM users WHERE id = $1`, userID).Scan(&name, &email); err != nil {
-		httpx.Error(w, http.StatusUnauthorized, "unknown_user", "User tidak ditemukan")
-		return
-	}
-	rows, err := h.db.Query(r.Context(), `
-		SELECT o.slug, o.name, m.role FROM org_members m JOIN organizations o ON o.id = m.org_id
-		WHERE m.user_id = $1 ORDER BY o.name`, userID)
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	orgs, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Membership])
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"id": userID, "name": name, "email": email, "orgs": orgs})
 }

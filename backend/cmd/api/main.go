@@ -13,6 +13,7 @@ import (
 
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
+	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
 	"github.com/gavinadlan/racego/backend/internal/server"
@@ -59,6 +60,7 @@ func run() error {
 		Addr: cfg.HTTPAddr,
 		Handler: server.NewRouter(server.Deps{
 			Cfg: cfg, DB: db, Redis: rdb, Inv: checkout.NewInventory(rdb), Snap: snap, Signer: signer,
+			Mailer: notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,

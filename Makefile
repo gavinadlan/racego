@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs migrate seed db-reset keygen api worker web dev test test-backend lint-web build loadtest
+.PHONY: help setup up down logs migrate seed db-reset grant keygen api worker web dev test test-backend lint-web build loadtest
 
 help: ## Tampilkan daftar perintah
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ seed: ## Isi data contoh (mitra, event, kategori, user dev)
 
 db-reset: ## HAPUS semua tabel lalu migrasi + seed ulang
 	cd backend && go run ./cmd/migrate reset && go run ./cmd/migrate up && go run ./cmd/migrate seed
+
+grant: ## Beri peran mitra: make grant EMAIL=kamu@x.com ORG=jakarta-runners ROLE=owner
+	cd backend && go run ./cmd/migrate grant "$(EMAIL)" "$(ORG)" "$(ROLE)"
 
 keygen: ## Buat kunci Ed25519 untuk QR tiket (tempel ke QR_PRIVATE_KEY)
 	cd backend && go run ./cmd/keygen

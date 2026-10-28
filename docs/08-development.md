@@ -34,8 +34,29 @@ make dev        # API :8080, worker, web :3000
 | Lihat email yang terkirim | http://localhost:8025 |
 | Masuk ke database | `docker compose exec postgres psql -U racego` |
 | Lihat stok di Redis | `docker compose exec redis redis-cli get '{cat:cccccccc-0000-0000-0000-000000000021}:stock'` |
+| Beri peran mitra ke akunmu | `make grant EMAIL=… ORG=jakarta-runners ROLE=owner` |
 | Data contoh terasa basi | `make db-reset` — tanggal seed relatif terhadap hari ini |
 | Uji beban | `make db-reset && make loadtest` |
+
+## Masuk (login) di laptop
+
+1. Buka http://localhost:3000, klik **Masuk**, isi email apa saja.
+2. Ambil kodenya: di development kode **dicatat di log API** (`make dev` / `make api`, baris `kode OTP (dev)`). Email-nya juga terkirim ke Mailpit (http://localhost:8025) bila `SMTP_ADDR=localhost:1025`, atau ke inbox sungguhan bila `.env` memakai SMTP Gmail/Resend.
+3. Akun baru diarahkan ke **Lengkapi profil**, lalu kembali ke halaman asal.
+
+Akun baru hanyalah pelari. Jadikan akunmu owner/staf penyelenggara (email harus sudah pernah login):
+
+```bash
+make grant EMAIL=kamu@gmail.com ORG=jakarta-runners ROLE=owner   # owner | admin | finance | rpc_staff
+```
+
+Pemilih **Akun contoh (dev)** di header (Budi, Sari, Andi, Rina dari seed) hanya muncul bila `NEXT_PUBLIC_DEV_LOGIN=true` dan hanya diterima backend saat `APP_ENV=development`. Memilih akun contoh otomatis keluar dari sesi sungguhan.
+
+Tes `SessionStore` & reconciler yang butuh Postgres jalan bila `RACEGO_TEST_DATABASE_URL` diisi:
+
+```bash
+cd backend && RACEGO_TEST_DATABASE_URL=$DATABASE_URL go test ./...
+```
 
 ## Konvensi kode
 
@@ -55,5 +76,7 @@ make dev        # API :8080, worker, web :3000
 | Halaman web "Tidak bisa terhubung ke server" | API belum jalan atau `NEXT_PUBLIC_API_URL` salah |
 | Tiket tidak muncul setelah bayar | Worker belum jalan (`make worker`). Di sandbox: buka halaman order-nya (status dicek langsung ke Midtrans) atau tunggu ±1 menit |
 | Kategori selalu `sale_not_open` | Jam penjualan seed sudah lewat 60 hari → `make db-reset` |
+| Kode OTP tidak datang | Lihat log API (`kode OTP (dev)`); 502 `mail_failed` = SMTP salah (cek `SMTP_*` di `.env` atau pakai Mailpit `localhost:1025`) |
+| Tetap "belum masuk" setelah login | `FRONTEND_URL` harus persis origin web (mis. `http://localhost:3000`, bukan `127.0.0.1`) agar cookie & CORS cocok |
 | Kamera scanner tidak mau menyala | Browser butuh HTTPS atau `localhost`; dari HP pakai `cloudflared tunnel --url http://localhost:3000` |
 | `go: missing go.sum entry` | Jalankan `cd backend && go mod tidy` |

@@ -2,6 +2,7 @@
 package notify
 
 import (
+	"crypto/tls"
 	"fmt"
 	"html"
 	"net"
@@ -10,6 +11,9 @@ import (
 	"strings"
 	"time"
 )
+
+// sendTimeout membatasi satu pengiriman (dial sampai QUIT); kode OTP dikirim langsung dari request API.
+const sendTimeout = 10 * time.Second
 
 type Mailer struct {
 	addr, user, pass, from string
@@ -28,12 +32,48 @@ func (m *Mailer) Send(to, subject, htmlBody string) error {
 	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
 		from.String(), to, mimeSubject(subject), time.Now().Format(time.RFC1123Z), htmlBody)
 
-	var auth smtp.Auth
-	if m.user != "" {
-		host, _, _ := net.SplitHostPort(m.addr)
-		auth = smtp.PlainAuth("", m.user, m.pass, host)
+	// Sama seperti smtp.SendMail, tapi dengan batas waktu agar server SMTP yang macet tidak menggantung request.
+	host, _, _ := net.SplitHostPort(m.addr)
+	conn, err := net.DialTimeout("tcp", m.addr, sendTimeout)
+	if err != nil {
+		return err
 	}
-	return smtp.SendMail(m.addr, auth, from.Address, []string{to}, []byte(b.String()))
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(sendTimeout)); err != nil {
+		return err
+	}
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			return err
+		}
+	}
+	if m.user != "" {
+		if err := c.Auth(smtp.PlainAuth("", m.user, m.pass, host)); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(from.Address); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	wc, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := wc.Write([]byte(b.String())); err != nil {
+		return err
+	}
+	if err := wc.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 func mimeSubject(s string) string {
@@ -74,5 +114,18 @@ func TicketEmail(buyerName, eventName, ticketsURL string, lines []TicketLine) (s
 <p><a href="%s" style="display:inline-block;margin-top:16px;padding:10px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">Lihat QR tiket</a></p>
 <p style="color:#666;font-size:13px">Tunjukkan QR beserta KTP saat pengambilan race pack.</p></div>`,
 		html.EscapeString(buyerName), html.EscapeString(eventName), rows.String(), html.EscapeString(ticketsURL))
+	return subject, body
+}
+
+// OTPEmail membuat isi email kode masuk. Kode di subjek supaya terbaca dari notifikasi.
+func OTPEmail(code string) (string, string) {
+	subject := "Kode masuk RaceGo: " + code
+	body := fmt.Sprintf(`<div style="font-family:system-ui,sans-serif;max-width:560px">
+<h2>Kode masuk RaceGo</h2>
+<p>Masukkan kode ini di halaman masuk:</p>
+<p style="font-size:36px;font-weight:700;letter-spacing:8px;margin:16px 0">%s</p>
+<p>Kode berlaku 10 menit dan hanya bisa dipakai sekali.</p>
+<p style="color:#666;font-size:13px">Bukan kamu yang meminta kode ini? Abaikan saja email ini; akunmu tetap aman.</p></div>`,
+		html.EscapeString(code))
 	return subject, body
 }

@@ -148,13 +148,19 @@ function StatusCard({ event }: { event: EventDetail }) {
 }
 
 function CategoryPicker({ event, onReserved }: { event: EventDetail; onReserved: (r: Reservation, c: Category) => void }) {
-  const { userId } = useSession();
+  const router = useRouter();
+  const { ready, userId } = useSession();
   const [qty, setQty] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canBuy = event.status === "open";
 
   async function reserve(c: Category) {
+    // Belum masuk: login dulu, slot belum diamankan.
+    if (!userId) {
+      router.push(`/masuk?next=${encodeURIComponent(`/events/${event.id}`)}`);
+      return;
+    }
     setBusy(c.id);
     setError(null);
     try {
@@ -222,7 +228,7 @@ function CategoryPicker({ event, onReserved }: { event: EventDetail; onReserved:
                         ))}
                       </select>
                     )}
-                    <button className={btnPrimary} disabled={!userId || soldOut || busy !== null} onClick={() => reserve(c)}>
+                    <button className={btnPrimary} disabled={!ready || soldOut || busy !== null} onClick={() => reserve(c)}>
                       {busy === c.id ? "Mengamankan slot…" : soldOut ? "Habis" : "Daftar"}
                     </button>
                   </div>

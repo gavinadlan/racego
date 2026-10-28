@@ -31,11 +31,23 @@ Batas free tier sering berubah — cek ulang sebelum deploy.
 1. Buat 2 VM Ampere A1 (1 OCPU, 6 GB masing-masing, Ubuntu 24.04) di satu VCN; buka port 5432/6379 hanya untuk subnet privat.
 2. VM 2: pasang Docker, jalankan Postgres + Redis (bisa memakai `docker-compose.yml` repo ini tanpa Mailpit), set password.
 3. VM 1: build image `backend/Dockerfile` dan frontend (`npm run build && npm start`), atau jalankan binary langsung via systemd.
-4. Isi `.env` produksi: `APP_ENV=production`, `QR_PRIVATE_KEY` dari `make keygen`, `DATABASE_URL`/`REDIS_ADDR` ke IP privat VM 2, SMTP Resend.
+4. Isi `.env` produksi: `APP_ENV=production`, `TRUSTED_PROXY_HOPS=1` (lihat di bawah), `QR_PRIVATE_KEY` dari `make keygen`, `DATABASE_URL`/`REDIS_ADDR` ke IP privat VM 2, SMTP Resend.
 5. `cloudflared tunnel` dari VM 1 ke domain kamu (`racego.example` → web :3000, `api.racego.example` → :8080). Tidak perlu membuka port publik.
 6. Arahkan Notification URL Midtrans sandbox ke `https://api.racego.example/v1/webhooks/midtrans`.
 
-> Penting: di `APP_ENV` selain `development`, header `X-User-ID` diabaikan — artinya login sungguhan (lihat roadmap) harus dibuat dulu sebelum demo publik.
+> Penting: di `APP_ENV` selain `development`, header `X-User-ID` diabaikan. Login memakai email + kode OTP (lihat [07-api](07-api.md)).
+
+### IP klien di belakang proxy (`TRUSTED_PROXY_HOPS`)
+
+Batas permintaan kode OTP per IP butuh IP klien yang asli. Header `X-Forwarded-For` bisa diisi siapa saja, jadi API hanya memercayainya sesuai `TRUSTED_PROXY_HOPS`:
+
+| Nilai | Kapan | IP klien diambil dari |
+| --- | --- | --- |
+| `0` (bawaan) | API diakses langsung (laptop, uji k6 tanpa proxy) | Alamat koneksi TCP; `X-Forwarded-For`/`X-Real-IP` diabaikan |
+| `1` | Cloudflare Tunnel langsung ke :8080 | `CF-Connecting-IP` (ditimpa Cloudflare), atau entri paling kanan `X-Forwarded-For` |
+| `2` | Cloudflare → Caddy → API | `CF-Connecting-IP`, atau entri kedua dari kanan `X-Forwarded-For` |
+
+Pasang nilai > 0 hanya bila port API **tidak** bisa dicapai selain lewat proxy tersebut (dengan Tunnel tidak ada port publik). Kalau proxy-nya bukan Cloudflare, pastikan proxy itu menghapus header `CF-Connecting-IP` dari klien.
 
 ## Uji beban di infra gratis
 

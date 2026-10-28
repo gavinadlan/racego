@@ -1,42 +1,72 @@
 "use client";
 
-import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
-import { getDevUserId, setDevUserId, type Me } from "@/lib/api";
-import { useApi } from "@/lib/use-api";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { apiFetch, DEV_USER_EVENT, getDevUserId, logout as apiLogout, setDevUserId, type Me } from "@/lib/api";
 
 type Session = {
-  ready: boolean; // false saat render server/hydrate, true setelah localStorage terbaca
+  ready: boolean; // true setelah GET /v1/auth/session pertama selesai
   userId: string | null;
   me: Me | null;
-  switchUser: (id: string | null) => void;
+  refresh: () => Promise<void>; // panggil setelah login / ubah profil
+  logout: () => Promise<void>;
+  switchUser: (id: string | null) => void; // akun contoh, hanya bila NEXT_PUBLIC_DEV_LOGIN=true
 };
 
 const SessionContext = createContext<Session | null>(null);
 
-// User dev disimpan di localStorage; perubahan disiarkan lewat event agar semua komponen ikut.
-const CHANGE_EVENT = "racego:user-change";
+// Akun contoh disimpan di localStorage; perubahan disiarkan lewat event agar semua komponen ikut.
 function subscribe(cb: () => void) {
-  window.addEventListener(CHANGE_EVENT, cb);
+  window.addEventListener(DEV_USER_EVENT, cb);
   window.addEventListener("storage", cb);
   return () => {
-    window.removeEventListener(CHANGE_EVENT, cb);
+    window.removeEventListener(DEV_USER_EVENT, cb);
     window.removeEventListener("storage", cb);
   };
 }
-const noopSubscribe = () => () => {};
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
-  const ready = useSyncExternalStore(noopSubscribe, () => true, () => false);
-  const userId = useSyncExternalStore(subscribe, getDevUserId, () => null);
-  // userId ikut sebagai dependensi: path sama, tapi user berbeda harus memuat ulang.
-  const { data: me } = useApi<Me>(userId ? "/v1/me" : null, [userId]);
+  const devUser = useSyncExternalStore(subscribe, getDevUserId, () => null);
+  const [state, setState] = useState<{ me: Me | null } | null>(null);
+  const seq = useRef(0);
 
-  const switchUser = useCallback((id: string | null) => {
-    setDevUserId(id);
-    window.dispatchEvent(new Event(CHANGE_EVENT));
+  // Sumber kebenaran: GET /v1/auth/session (cookie sesi, atau X-User-ID akun contoh); me null = belum masuk.
+  // Respons lama diabaikan.
+  const refresh = useCallback(async () => {
+    const n = ++seq.current;
+    // undefined = error jaringan: pertahankan status sebelumnya.
+    const me = await apiFetch<{ me: Me | null }>("/v1/auth/session").then(
+      (r) => r.me,
+      () => undefined,
+    );
+    if (n !== seq.current) return;
+    setState((s) => (me === undefined ? (s ?? { me: null }) : { me }));
   }, []);
 
-  return <SessionContext.Provider value={{ ready, userId, me, switchUser }}>{children}</SessionContext.Provider>;
+  useEffect(() => {
+    void refresh();
+  }, [refresh, devUser]);
+
+  const logout = useCallback(async () => {
+    await apiLogout().catch(() => {});
+    if (getDevUserId()) setDevUserId(null);
+    seq.current++;
+    setState({ me: null });
+  }, []);
+
+  const switchUser = useCallback(
+    async (id: string | null) => {
+      await logout(); // jangan sampai ada dua identitas sekaligus
+      setDevUserId(id);
+    },
+    [logout],
+  );
+
+  const me = state?.me ?? null;
+  return (
+    <SessionContext.Provider value={{ ready: state !== null, userId: me?.id ?? null, me, refresh, logout, switchUser }}>
+      {children}
+    </SessionContext.Provider>
+  );
 }
 
 export function useSession() {

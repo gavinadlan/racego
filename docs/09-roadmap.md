@@ -4,7 +4,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 
 ## Fase 1 — melengkapi MVP
 
-- [ ] **Login sungguhan**: email OTP + Google, JWT pendek + refresh token; hapus ketergantungan `X-User-ID`
+- [x] **Login email OTP**: kode 6 digit, sesi cookie HttpOnly di Postgres, `X-User-ID` hanya di development
+- [ ] **Login Google**
 - [ ] **Profil pelari** (`runner_profiles`): isi sekali, prefill semua peserta
 - [ ] **Virtual waiting room** (Redis ZSET + token HMAC) dan Turnstile di tombol Daftar
 - [ ] **CRUD event & kategori** dari dashboard mitra (draft → review → published)

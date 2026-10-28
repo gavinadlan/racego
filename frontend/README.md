@@ -20,6 +20,8 @@ npm run build
 | `/untuk-penyelenggara` | Halaman penawaran untuk calon mitra |
 | `/events/[eventId]` | Detail event, hitung mundur, pilih kategori → reservasi slot (timer) → isi data peserta → bayar |
 | `/orders/[orderId]` | Status order (polling); di mode mock ada tombol simulasi bayar |
+| `/masuk` | Masuk/daftar dengan email + kode 6 digit; `?next=/path` (hanya path relatif) untuk kembali setelah login |
+| `/akun` | Profil (nama, no. HP), peran mitra, keluar; `?baru=1&next=…` = "Lengkapi profil" setelah daftar |
 | `/tickets` | Tiket saya: tiket berbentuk BIB dengan QR |
 | `/org/[org]` | Dashboard mitra: penjualan & progres race pack per event |
 | `/org/[org]/events/[eventId]/scan` | Scanner race pack (kamera via `@zxing/browser`, input manual, pencarian nama/BIB) |
@@ -44,7 +46,8 @@ src/
 
 ## Catatan
 
-- **Login masih versi dev**: pilih user contoh di menu DEV (kanan atas). Identitas dikirim lewat header `X-User-ID` dan hanya diterima backend saat `APP_ENV=development`.
+- **Login**: email + kode OTP; sesi berupa cookie HttpOnly dari backend, jadi `apiFetch` selalu memakai `credentials: "include"`. `components/session.tsx` (`useSession()`: `ready`, `userId`, `me`, `refresh`, `logout`) membaca `GET /v1/auth/session` (selalu 200, `me: null` bila belum masuk).
+- **Akun contoh (dev)**: pemilih di header hanya muncul bila `NEXT_PUBLIC_DEV_LOGIN=true`; identitas dikirim lewat header `X-User-ID` yang hanya diterima backend saat `APP_ENV=development`. Set `false`/hapus saat deploy.
 - **Kamera scanner** butuh HTTPS atau `localhost`. Untuk mencoba dari HP di jaringan yang sama, pakai tunnel HTTPS (mis. `cloudflared tunnel --url http://localhost:3000`).
 - `cacheComponents` aktif (bawaan Next 16): komponen yang membaca `useParams`/`useSearchParams` dibungkus `<Suspense>` di `page.tsx`.
 - Baca `AGENTS.md` sebelum memakai AI coding agent — API Next 16 berbeda dari versi lama.
