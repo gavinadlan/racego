@@ -1,0 +1,6 @@
+DROP INDEX IF EXISTS events_city_idx;
+ALTER TABLE events DROP COLUMN IF EXISTS tagline, DROP COLUMN IF EXISTS start_time,
+    DROP COLUMN IF EXISTS racepack_info, DROP COLUMN IF EXISTS theme_color, DROP COLUMN IF EXISTS cover_url;
+ALTER TABLE organizations DROP COLUMN IF EXISTS description, DROP COLUMN IF EXISTS city,
+    DROP COLUMN IF EXISTS instagram, DROP COLUMN IF EXISTS website, DROP COLUMN IF EXISTS theme_color,
+    DROP COLUMN IF EXISTS logo_url;

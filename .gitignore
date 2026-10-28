@@ -1,0 +1,27 @@
+# env & rahasia
+.env
+.env.local
+*.pem
+
+# Go
+backend/bin/
+backend/tmp/
+*.test
+coverage.out
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+
+# OS & editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# hasil uji beban
+loadtest/results/

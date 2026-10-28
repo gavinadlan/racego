@@ -1,0 +1,44 @@
+# Infra lokal untuk development: PostgreSQL, Redis, dan Mailpit (penangkap email).
+# Jalankan: make up   (atau: docker compose up -d)
+name: racego
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: racego
+      POSTGRES_PASSWORD: racego
+      POSTGRES_DB: racego
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U racego -d racego"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    # appendonly agar kuota & antrian tidak hilang saat container restart
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI: http://localhost:8025
+
+volumes:
+  pgdata:
+  redisdata:
