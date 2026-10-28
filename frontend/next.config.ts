@@ -2,7 +2,8 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Build produksi berupa folder mandiri (.next/standalone) untuk image Docker; lihat frontend/Dockerfile.
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

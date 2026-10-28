@@ -26,3 +26,8 @@ npm-debug.log*
 
 # hasil uji beban
 loadtest/results/
+
+# deploy
+.env.prod
+.env.demo
+backups/

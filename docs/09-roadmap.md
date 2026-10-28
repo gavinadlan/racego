@@ -30,7 +30,11 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Scanner offline (IndexedDB + verifikasi kunci publik)
 - [ ] QR dinamis hari-H
 - [ ] Observabilitas: OpenTelemetry → Prometheus/Grafana, dashboard live war tiket
-- [ ] CI GitHub Actions: `make test` + build image
+- [x] CI GitHub Actions: tes backend dengan Postgres, lint/build frontend, build image
+- [x] Paket deploy satu server: Docker Compose + Caddy (HTTPS otomatis), backup/restore teruji, `make demo` via Cloudflare quick tunnel
+- [ ] Deploy otomatis (CD) dari GitHub ke server
+- [ ] Content-Security-Policy, mulai dari mode `Report-Only` (perlu mengizinkan skrip & iframe Midtrans Snap)
+- [ ] Pemantauan stack produksi: uptime check + alert (Grafana, lihat butir observabilitas)
 - [ ] Ballot/undian untuk event super-favorit
 - [ ] Notifikasi WhatsApp
 

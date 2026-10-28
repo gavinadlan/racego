@@ -1,0 +1,104 @@
+# CI RaceGo: tes backend (dengan Postgres sungguhan), lint/build frontend, build kedua image Docker.
+# Tidak butuh rahasia apa pun.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: racego
+          POSTGRES_PASSWORD: racego
+          POSTGRES_DB: racego
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U racego -d racego"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://racego:racego@localhost:5432/racego?sslmode=disable
+      # Terisi → tes integrasi Postgres (portal mitra, auth, pembayaran) ikut jalan, tidak di-skip.
+      RACEGO_TEST_DATABASE_URL: postgres://racego:racego@localhost:5432/racego?sslmode=disable
+      REDIS_ADDR: localhost:6379
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Migrasi + data seed
+        # Beberapa tes integrasi memakai akun & event dari migrations/seed.sql.
+        run: go run ./cmd/migrate up && go run ./cmd/migrate seed
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: |
+          go test -v ./... 2>&1 | tee test.log
+          if grep -- '--- SKIP' test.log; then echo "::error::ada tes yang di-skip"; exit 1; fi
+
+  frontend:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - name: Type-check
+        run: npx next typegen && npx tsc --noEmit
+      - run: npm run build
+
+  images:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Image backend
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          push: false
+          tags: racego-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Image frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: false
+          tags: racego-web:ci
+          build-args: |
+            NEXT_PUBLIC_API_URL=
+            NEXT_PUBLIC_DEV_LOGIN=false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max

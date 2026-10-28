@@ -1,0 +1,215 @@
+# Stack produksi RaceGo: satu server Linux mana pun yang punya Docker, atau laptop untuk demo.
+# Jangan dipanggil langsung; pakai Makefile (make prod-up, make demo) yang membaca .env.prod.
+# Panduan lengkap: docs/10-deploy.md
+#
+# Hanya caddy yang membuka port ke host. Semua service lain hanya di jaringan internal Docker.
+name: racego-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-hardening: &hardening
+  restart: unless-stopped
+  logging: *logging
+  security_opt:
+    - no-new-privileges:true
+
+# Konfigurasi bersama api, worker, migrate (satu image backend berisi semua binary).
+x-backend: &backend
+  <<: *hardening
+  image: racego-backend:latest
+  build: ./backend
+  read_only: true
+  tmpfs:
+    - /tmp
+  environment: &backend-env
+    APP_ENV: production
+    HTTP_ADDR: ":8080"
+    # Diturunkan dari SITE_ADDRESS agar tidak bisa tidak sinkron; make demo mengisinya dengan URL tunnel.
+    FRONTEND_URL: ${FRONTEND_URL:-https://${SITE_ADDRESS:?isi SITE_ADDRESS di .env.prod}}
+    TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
+    DATABASE_URL: postgres://${POSTGRES_USER:?jalankan scripts/gen-secrets.sh}:${POSTGRES_PASSWORD:?jalankan scripts/gen-secrets.sh}@postgres:5432/racego?sslmode=disable
+    REDIS_ADDR: redis:6379
+    REDIS_PASSWORD: ${REDIS_PASSWORD:?jalankan scripts/gen-secrets.sh}
+    QR_PRIVATE_KEY: ${QR_PRIVATE_KEY:?jalankan scripts/gen-secrets.sh}
+    MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-}
+    MIDTRANS_IS_PRODUCTION: ${MIDTRANS_IS_PRODUCTION:-false}
+    RESERVATION_TTL: ${RESERVATION_TTL:-15m}
+    AUTO_VERIFY_ORGS: ${AUTO_VERIFY_ORGS:-false}
+    UPLOAD_DIR: /data/uploads
+    SMTP_ADDR: ${SMTP_ADDR:-}
+    SMTP_USERNAME: ${SMTP_USERNAME:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    MAIL_FROM: ${MAIL_FROM:-RaceGo <no-reply@racego.local>}
+
+services:
+  postgres:
+    <<: *hardening
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: racego
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d racego"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+    mem_limit: 1g
+
+  redis:
+    <<: *hardening
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    # appendonly: kuota & antrian tetap ada setelah restart. noeviction: kunci stok tidak boleh dibuang.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 20s
+    mem_limit: 384m
+
+  # Sekali jalan setiap deploy: migrasi idempoten. api & worker baru start bila ini sukses.
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["/app/migrate", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256m
+
+  api:
+    <<: *backend
+    command: ["/app/api"]
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/healthcheck", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    stop_grace_period: 20s
+    mem_limit: 512m
+
+  worker:
+    <<: *backend
+    command: ["/app/worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/healthcheck", "deps"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 30s
+    mem_limit: 256m
+
+  web:
+    <<: *hardening
+    image: racego-web:latest
+    build:
+      context: ./frontend
+      args:
+        # API relatif ke origin yang sama (Caddy) → image tidak perlu di-build ulang saat alamat berubah.
+        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_DEV_LOGIN: "false"
+        NEXT_PUBLIC_MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-}
+        NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION: ${MIDTRANS_IS_PRODUCTION:-false}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 15s
+    mem_limit: 512m
+
+  caddy:
+    <<: *hardening
+    image: caddy:2-alpine
+    # Root di dalam container hanya untuk menulis volume sertifikat; semua capability lain dibuang.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+      PROXY_MODE: ${PROXY_MODE:-direct}
+    ports:
+      # CADDY_BIND=127.0.0.1 saat di belakang tunnel: Caddy tidak boleh terjangkau langsung dari luar.
+      - "${CADDY_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+      - "${CADDY_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+      - "${CADDY_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    stop_grace_period: 10s
+    mem_limit: 256m
+
+  # Opsional (make ... dengan profile tunnel): Cloudflare Tunnel bernama di server tanpa port terbuka.
+  # Isi TUNNEL_TOKEN dari dasbor Cloudflare, arahkan hostname tunnel ke http://caddy:80,
+  # lalu set SITE_ADDRESS=:80, PROXY_MODE=tunnel, CADDY_BIND=127.0.0.1 di .env.prod.
+  cloudflared:
+    <<: *hardening
+    image: cloudflare/cloudflared:2026.10.5
+    profiles: [tunnel]
+    command: ["tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    read_only: true
+    depends_on:
+      caddy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 128m
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  caddy_data:
+  caddy_config:

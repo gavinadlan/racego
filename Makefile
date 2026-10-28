@@ -5,7 +5,8 @@ SHELL := /bin/bash
 export
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs migrate seed db-reset grant verify keygen api worker web dev test test-backend lint-web build loadtest
+.PHONY: help setup up down logs migrate seed db-reset grant verify keygen api worker web dev test test-backend lint-web build loadtest \
+	prod-build prod-up prod-down prod-logs prod-migrate prod-seed prod-grant prod-verify backup restore demo demo-down
 
 help: ## Tampilkan daftar perintah
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -68,3 +69,49 @@ build: ## Build binary backend & frontend produksi
 
 loadtest: ## Uji beban war tiket dengan k6 (butuh k6 terpasang)
 	k6 run loadtest/war-tiket.js
+
+# ===== Produksi (docker-compose.prod.yml + .env.prod), panduan: docs/10-deploy.md =====
+# Variabel dari .env development (di-export di atas) dibuang dulu: compose mengutamakan environment
+# shell di atas --env-file, jadi tanpa ini mis. AUTO_VERIFY_ORGS=true dari .env ikut ke produksi.
+PROD_ENV ?= .env.prod
+PROD_VARS := FRONTEND_URL $(shell sed -n 's/^\([A-Z_]*\)=.*/\1/p' .env.prod.example)
+CLEAN_ENV := env $(addprefix -u ,$(PROD_VARS)) ENV_FILE=$(PROD_ENV)
+PROD := $(CLEAN_ENV) docker compose -f docker-compose.prod.yml --env-file $(PROD_ENV)
+
+prod-build: ## Build image backend & frontend produksi
+	@$(PROD) build
+
+prod-up: ## Build + jalankan stack produksi, tunggu semua sehat (juga untuk update)
+	@test -f $(PROD_ENV) || (echo "$(PROD_ENV) belum ada: cp .env.prod.example .env.prod && scripts/gen-secrets.sh" && exit 1)
+	@$(PROD) up -d --build --wait --remove-orphans
+	@$(PROD) ps
+
+prod-down: ## Matikan stack produksi (data di volume tetap ada)
+	@$(PROD) down
+
+prod-logs: ## Log stack produksi: make prod-logs [S=api]
+	@$(PROD) logs -f --tail=200 $(S)
+
+prod-migrate: ## Jalankan migrasi produksi manual (prod-up sudah otomatis)
+	@$(PROD) run --rm migrate /app/migrate up
+
+prod-seed: ## Isi data contoh di produksi (untuk demo; tanggal relatif hari ini)
+	@$(PROD) run --rm migrate /app/migrate seed
+
+prod-grant: ## Peran mitra produksi: make prod-grant EMAIL=kamu@x.com ORG=slug ROLE=owner
+	@$(PROD) run --rm migrate /app/migrate grant "$(EMAIL)" "$(ORG)" "$(ROLE)"
+
+prod-verify: ## Verifikasi mitra produksi: make prod-verify ORG=slug
+	@$(PROD) run --rm migrate /app/migrate verify "$(ORG)"
+
+backup: ## Backup database + unggahan ke backups/ (simpan 7 terakhir)
+	@$(CLEAN_ENV) scripts/backup.sh
+
+restore: ## Pulihkan backup: make restore FILE=backups/racego-YYYYMMDD-HHMMSS
+	@$(CLEAN_ENV) scripts/restore.sh "$(FILE)"
+
+demo: ## Demo dari laptop lewat Cloudflare quick tunnel (butuh cloudflared)
+	@$(CLEAN_ENV) scripts/demo.sh
+
+demo-down: ## Hentikan demo & tunnel
+	@$(CLEAN_ENV) scripts/demo.sh down

@@ -75,7 +75,27 @@ Aturan dependensi: modul boleh saling impor ke arah "bawah" saja (`checkout` →
 
 - `POST /v1/org/{org}/uploads` (owner/admin) menerima JPEG/PNG maks 3 MB, sisi terpanjang maks 4.000 px. Tipe ditentukan dari **isi file** (`http.DetectContentType` + `image.DecodeConfig`/`Decode`), lalu gambar di-**encode ulang** sehingga EXIF/GPS hilang.
 - Nama file = SHA-256 isi + `.jpg`/`.png`: tidak bisa ditebak, tidak menimpa file lain, dan aman di-cache `immutable`. DB menyimpan path relatif `/uploads/<hash>.jpg`.
-- `upload.Storage` (sekarang `upload.Disk` di `UPLOAD_DIR`, default `backend/data/uploads`) bisa diganti S3/R2 tanpa mengubah handler. `GET /uploads/{name}` hanya menerima nama `^[a-f0-9]{64}\.(jpg|png)$` (tanpa path traversal). File yang tidak dipakai lagi belum dibersihkan otomatis.
+- `upload.Storage` (sekarang `upload.Disk` di `UPLOAD_DIR`: default `backend/data/uploads`, di stack produksi volume `uploads` yang ikut `make backup`) bisa diganti S3/R2 tanpa mengubah handler. `GET /uploads/{name}` hanya menerima nama `^[a-f0-9]{64}\.(jpg|png)$` (tanpa path traversal). File yang tidak dipakai lagi belum dibersihkan otomatis.
+
+## Deploy
+
+Satu server, satu `docker-compose.prod.yml` (proyek `racego-prod`). Caddy satu-satunya pintu masuk dan satu origin untuk web + API, sehingga tidak ada CORS/cookie lintas domain. Langkah lengkap: [10-deploy.md](10-deploy.md).
+
+```mermaid
+flowchart LR
+  B[Browser] -- "HTTPS :443 (atau via Cloudflare Tunnel)" --> C[caddy<br/>HSTS · gzip/zstd · body maks 4 MB]
+  C -- "/v1/* · /uploads/* · /healthz" --> A[api]
+  C -- selain itu --> W[web<br/>Next.js standalone]
+  M[migrate<br/>sekali jalan, sukses dulu] --> P[(postgres<br/>vol pgdata)]
+  A --> P
+  A --> R[(redis appendonly<br/>vol redisdata)]
+  A --- U[(vol uploads)]
+  K[worker] --> P & R
+```
+
+- Image backend tunggal (distroless, non-root) berisi `api`, `worker`, `migrate`, `keygen`, dan `healthcheck` (probe Docker tanpa curl). Image web memakai `output: "standalone"` dan `NEXT_PUBLIC_API_URL=""`, sehingga tidak bergantung alamat situs.
+- Hanya Caddy yang punya `ports:`. Redis wajib password, Postgres memakai user/password acak dari `scripts/gen-secrets.sh`.
+- `api`/`worker` baru start setelah `migrate` sukses (`service_completed_successfully`). Setiap service punya healthcheck, `restart: unless-stopped`, log berotasi, batas memori, dan `read_only` di mana praktis.
 
 ## Multi-tenancy
 

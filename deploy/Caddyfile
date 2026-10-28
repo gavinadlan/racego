@@ -1,0 +1,53 @@
+# Caddy: satu-satunya pintu masuk RaceGo (lihat docs/10-deploy.md).
+# SITE_ADDRESS: domain publik (sertifikat Let's Encrypt otomatis), localhost (sertifikat lokal),
+# atau :80 di belakang Cloudflare Tunnel (TLS diurus Cloudflare).
+{
+	# Admin API hanya di dalam container, dipakai healthcheck.
+	admin 127.0.0.1:2019
+	# SITE_ADDRESS=localhost memakai CA lokal Caddy; jangan coba memasangnya ke trust store container.
+	skip_install_trust
+}
+
+# PROXY_MODE=direct: klien terhubung langsung ke Caddy, jadi CF-Connecting-IP dari klien palsu
+# dan dibuang. X-Forwarded-For selalu ditimpa Caddy dengan IP pengirim (tanpa trusted_proxies),
+# sehingga API (TRUSTED_PROXY_HOPS=1) membaca IP asli.
+(proxy_direct) {
+	request_header -CF-Connecting-IP
+}
+
+# PROXY_MODE=tunnel: CF-Connecting-IP diisi Cloudflare dan dipercaya API. Aman hanya bila Caddy
+# tidak terjangkau dari luar selain lewat tunnel (CADDY_BIND=127.0.0.1 / tanpa port publik).
+(proxy_tunnel) {
+}
+
+{$SITE_ADDRESS} {
+	import proxy_{$PROXY_MODE:direct}
+
+	encode zstd gzip
+
+	# Sedikit di atas batas unggah poster/logo (3 MB).
+	request_body {
+		max_size 4MB
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		# Kamera untuk scanner tiket di origin sendiri. CSP belum dipasang: popup Midtrans Snap
+		# memuat skrip & iframe dari domain Midtrans (lihat roadmap: CSP Report-Only).
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		-Server
+	}
+	# HSTS hanya untuk domain sungguhan; di localhost akan memaksa HTTPS ke semua port lokal.
+	@hsts not host localhost 127.0.0.1
+	header @hsts Strict-Transport-Security "max-age=31536000"
+
+	@api path /v1/* /uploads/* /healthz
+	handle @api {
+		reverse_proxy api:8080
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

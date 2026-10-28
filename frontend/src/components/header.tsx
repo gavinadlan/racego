@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { DEV_LOGIN } from "@/lib/api";
 import { DEV_USERS, initials } from "@/lib/format";
 import { LoginLink } from "./login-link";
 import { useSession } from "./session";
@@ -168,7 +167,8 @@ export function Header() {
           </Suspense>
         </nav>
         <div className="ml-auto flex items-center gap-3">
-          {DEV_LOGIN && <DevPicker />}
+          {/* Dicek langsung (bukan lewat DEV_LOGIN) agar build produksi membuang DevPicker dari bundle. */}
+          {process.env.NEXT_PUBLIC_DEV_LOGIN === "true" && <DevPicker />}
           {!ready ? (
             <span className="size-10" aria-hidden />
           ) : me ? (

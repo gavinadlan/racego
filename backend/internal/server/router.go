@@ -130,8 +130,9 @@ func NewRouter(d Deps) http.Handler {
 			})
 		})
 
-		// Khusus development: simulasi pembayaran tanpa Midtrans
-		if d.Cfg.IsDev() {
+		// Simulasi pembayaran tanpa Midtrans: development, atau mode mock (MIDTRANS_SERVER_KEY kosong,
+		// mis. demo). Di mode mock kunci tanda tangan webhook sudah publik, jadi rute ini tidak menambah celah.
+		if d.Cfg.IsDev() || d.Cfg.MidtransMock() {
 			r.With(auth.Require).Post("/dev/orders/{orderID}/simulate", pay.SimulateHandler)
 		}
 	})

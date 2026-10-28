@@ -1,5 +1,7 @@
 # RaceGo
 
+[![CI](https://github.com/gavinadlan/racego/actions/workflows/ci.yml/badge.svg)](https://github.com/gavinadlan/racego/actions/workflows/ci.yml)
+
 Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menjual tiket fun run 5K, 10K, half marathon, dan full marathon di satu web. Pembayaran lewat **Midtrans**, tiket **QR** terbit otomatis setelah lunas, dan staf mitra men-scan QR saat pengambilan race pack — semuanya dirancang tahan **war tiket** (puluhan ribu orang di detik yang sama).
 
 > Proyek pribadi / portofolio. Infra 100% gratis, pembayaran memakai Midtrans **sandbox** atau mode **mock**.
@@ -9,13 +11,17 @@ Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menj
 ```
 RaceGo/
 ├── backend/            API + worker (Go, modular monolith)
-│   ├── cmd/            api · worker · migrate · keygen
+│   ├── cmd/            api · worker · migrate · keygen · healthcheck
 │   ├── internal/       checkout · payment · ticket · ledger · tenant · event · worker · ...
 │   └── migrations/     skema SQL + seed data contoh
 ├── frontend/           Web Next.js 16 (pelari, dashboard mitra, scanner race pack)
-├── docs/               PRD, arsitektur, war tiket, pembayaran, tiket QR, infra gratis, API, ADR
+├── docs/               PRD, arsitektur, war tiket, pembayaran, tiket QR, infra gratis, API, deploy, ADR
 ├── loadtest/           Skrip k6 uji beban war tiket
-├── docker-compose.yml  Postgres · Redis · Mailpit untuk development
+├── deploy/Caddyfile    Reverse proxy produksi (HTTPS otomatis, header keamanan)
+├── scripts/            gen-secrets · backup · restore · demo · check-ip-spoof
+├── docker-compose.yml       Postgres · Redis · Mailpit untuk development
+├── docker-compose.prod.yml  Stack produksi lengkap (caddy, web, api, worker, postgres, redis)
+├── .github/workflows/  CI: tes backend + Postgres, build frontend, build image
 └── Makefile            Semua perintah sehari-hari (`make help`)
 ```
 
@@ -55,6 +61,20 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | `make verify ORG=…` | Verifikasi penyelenggara agar bisa menerbitkan event (bila `AUTO_VERIFY_ORGS=false`) |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
 | `make loadtest` | Uji beban war tiket dengan k6 |
+| `make prod-up` / `make demo` | Stack produksi di server / demo dari laptop (lihat [Deploy](#deploy)) |
+
+## Deploy
+
+Satu perintah menjalankan seluruh aplikasi dalam mode produksi di server Linux mana pun yang punya Docker, dengan HTTPS otomatis (Caddy + Let's Encrypt) di satu alamat:
+
+```bash
+cp .env.prod.example .env.prod
+scripts/gen-secrets.sh        # password acak + kunci QR (cadangkan .env.prod!)
+nano .env.prod                # SITE_ADDRESS, SMTP, Midtrans sandbox
+make prod-up                  # build, migrasi otomatis, tunggu semua sehat
+```
+
+Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudflared`; alamat `https://….trycloudflare.com` berubah setiap dinyalakan). Backup terjadwal: `make backup` / `make restore FILE=…`. Panduan langkah demi langkah untuk pemula, checklist keamanan, dan troubleshooting: [docs/10-deploy.md](docs/10-deploy.md).
 
 ## Status
 

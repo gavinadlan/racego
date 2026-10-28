@@ -62,6 +62,12 @@ Tes yang butuh Postgres (`SessionStore`, reconciler, dan uji portal mitra di `in
 cd backend && RACEGO_TEST_DATABASE_URL=$DATABASE_URL go test ./...
 ```
 
+## Menjalankan versi produksi
+
+Untuk mencoba stack produksi (Docker Compose + Caddy, HTTPS lokal) atau men-deploy ke server, lihat [10-deploy.md](10-deploy.md). Singkatnya: `cp .env.prod.example .env.prod && scripts/gen-secrets.sh`, biarkan `SITE_ADDRESS=localhost`, lalu `make prod-up` dan buka https://localhost (sertifikat lokal Caddy; browser akan memperingatkan). `make demo` membukanya ke internet lewat Cloudflare quick tunnel. Stack produksi memakai proyek Docker `racego-prod` dan volume sendiri, jadi tidak mengganggu `make up`.
+
+CI (`.github/workflows/ci.yml`) menjalankan migrasi + seed di Postgres baru, `go vet`, `go test` (gagal bila ada tes yang di-skip), lint/type-check/build frontend di Node 20 dan 22, serta build kedua image.
+
 ## Konvensi kode
 
 - **Backend**: satu folder per modul di `internal/`. Handler HTTP tipis; logika yang perlu dites dipisah (lihat `checkout/inventory.go`, `ledger/ledger.go`). Semua query mitra memakai `tenant.FromContext(ctx).OrgID`. Uang selalu `int64` rupiah.
