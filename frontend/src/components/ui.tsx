@@ -94,3 +94,49 @@ export function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+/**
+ * Label yang selalu terlihat di atas kolom, keterangan singkat, dan pesan error dari server.
+ * labelClass mis. "lg:sr-only" untuk tabel yang judul kolomnya sudah ada di baris kepala.
+ */
+export function Field({
+  label,
+  required,
+  hint,
+  error,
+  labelClass = "",
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  error?: string;
+  labelClass?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block min-w-0">
+      <span className={`mb-1 block text-sm font-semibold ${labelClass}`}>
+        {label}
+        {required ? (
+          <span className="ml-0.5 text-hivis" aria-hidden>
+            *
+          </span>
+        ) : (
+          <span className="ml-1 font-normal text-muted">(opsional)</span>
+        )}
+      </span>
+      {children}
+      {hint && !error && <span className="mt-1 block text-xs text-muted">{hint}</span>}
+      {error && (
+        <span className="mt-1 block text-xs font-medium text-red-700" role="alert">
+          {error}
+        </span>
+      )}
+    </label>
+  );
+}
+
+/** Kelas input dengan tanda merah bila ada error. */
+export const inputErr = (error?: string) => `${inputCls} ${error ? "border-red-500 focus:border-red-600" : ""}`;
+

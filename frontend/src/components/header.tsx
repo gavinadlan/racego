@@ -106,6 +106,11 @@ function AccountMenu() {
               Dashboard {o.name}
             </Link>
           ))}
+          {me.orgs.length === 0 && (
+            <Link href="/daftar-mitra" className={item} onClick={close}>
+              Jadi penyelenggara
+            </Link>
+          )}
           <Link href="/akun" className={item} onClick={close}>
             Akun
           </Link>

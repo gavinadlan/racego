@@ -41,6 +41,7 @@ Atau pakai akun contoh di menu **Akun contoh (dev)** (kanan atas):
 | Sari | Owner Jakarta Runners | Dashboard mitra: penjualan & progres race pack |
 | Andi | Staf RPC Jakarta | **Scan race pack**: QR valid → hijau, scan ulang → kuning |
 | Rina | Owner Bandung Trail | Coba buka data Jakarta → ditolak (isolasi multi-tenant) |
+| Akunmu sendiri | Calon mitra | Menu akun → **Jadi penyelenggara** → buat event (kategori, poster) → **Terbitkan** → event muncul di beranda; tambah staf di tab **Tim** |
 
 Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di port **55432** dan Redis di **6380** (bukan port bawaan) supaya tidak bentrok dengan instalasi lain di Mac.
 
@@ -51,6 +52,7 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | `make test` | Tes backend (termasuk 1.000 pembeli berebut 50 slot → tepat 50 sukses) + lint & type-check frontend |
 | `make db-reset` | Hapus semua data lalu migrasi + seed ulang |
 | `make grant EMAIL=… ORG=… ROLE=…` | Beri akun sungguhan peran di penyelenggara |
+| `make verify ORG=…` | Verifikasi penyelenggara agar bisa menerbitkan event (bila `AUTO_VERIFY_ORGS=false`) |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
 | `make loadtest` | Uji beban war tiket dengan k6 |
 
@@ -60,11 +62,12 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | --- | --- |
 | Login email + kode OTP, sesi cookie, halaman akun | Login Google |
 | Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | |
-| Kalender bulanan & daftar, arsip race, halaman penyelenggara | Upload poster event |
+| Kalender bulanan & daftar, arsip race, halaman penyelenggara | Verifikasi dokumen & rekening mitra |
 | Multi-tenant (mitra, peran, isolasi data) | |
 | Reservasi atomik Redis + timer + pengembalian kuota | Waiting room / antrian virtual |
 | Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan dana via Midtrans Payouts |
-| Webhook idempotent + verifikasi signature + outbox | CRUD event & onboarding mitra dari UI |
+| Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
+| Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | |
 | Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund |
 | Scanner race pack (kamera, manual, anti dobel scan) | Row-Level Security Postgres |
 | Ledger double-entry + email tiket | Observabilitas (Grafana) |

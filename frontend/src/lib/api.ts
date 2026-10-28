@@ -35,6 +35,7 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public retryAfter?: number,
+    public fields?: Record<string, string>, // 422 validation: pesan per kolom form
   ) {
     super(message);
   }
@@ -42,7 +43,7 @@ export class ApiError extends Error {
 
 export async function apiFetch<T>(
   path: string,
-  init: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
+  init: { method?: string; body?: unknown; headers?: Record<string, string>; form?: FormData } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { ...init.headers };
   const userId = typeof window !== "undefined" ? getDevUserId() : null;
@@ -54,7 +55,7 @@ export async function apiFetch<T>(
     res = await fetch(`${API_URL}${path}`, {
       method: init.method ?? "GET",
       headers,
-      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+      body: init.form ?? (init.body !== undefined ? JSON.stringify(init.body) : undefined),
       cache: "no-store",
       credentials: "include",
     });
@@ -64,10 +65,13 @@ export async function apiFetch<T>(
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(res.status, data.error ?? "unknown", data.message ?? `Error ${res.status}`, data.retry_after);
+    throw new ApiError(res.status, data.error ?? "unknown", data.message ?? `Error ${res.status}`, data.retry_after, data.fields);
   }
   return data as T;
 }
+
+/** URL gambar unggahan (path relatif "/uploads/…" dari backend). */
+export const assetUrl = (url: string) => `${API_URL}${url}`;
 
 // ===== Tipe respons =====
 
@@ -104,7 +108,7 @@ export type Category = {
   max_per_user: number;
 };
 
-export type OrgBrief = { slug: string; name: string; city: string; description: string; theme_color: string };
+export type OrgBrief = { slug: string; name: string; city: string; description: string; theme_color: string; logo_url: string | null };
 
 export type EventDetail = EventSummary & {
   description: string;
@@ -114,7 +118,6 @@ export type EventDetail = EventSummary & {
 };
 
 export type Organizer = OrgBrief & {
-  logo_url: string | null;
   instagram: string | null;
   website: string | null;
   upcoming_events: number;
@@ -231,3 +234,117 @@ export function safeNext(next: string | null | undefined): string {
   const ok = next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") && !next.startsWith("/masuk");
   return ok ? next : "/";
 }
+
+// ===== Portal mitra =====
+
+export type Role = "owner" | "admin" | "finance" | "rpc_staff";
+
+export const ROLE_LABEL: Record<Role, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  finance: "Keuangan",
+  rpc_staff: "Staf race pack",
+};
+
+/** Peran user di org tertentu (dari me.orgs), atau null bila bukan anggota. */
+export const roleIn = (me: Me | null, slug: string) => (me?.orgs.find((o) => o.slug === slug)?.role as Role | undefined) ?? null;
+export const canEdit = (role: Role | null) => role === "owner" || role === "admin";
+
+export type OrgInput = { name: string; slug?: string; city: string; description: string; instagram: string; website: string };
+
+export type OrgProfile = {
+  slug: string;
+  name: string;
+  city: string;
+  description: string;
+  instagram: string | null;
+  website: string | null;
+  theme_color: string;
+  logo_url: string | null;
+  kyc_status: "pending" | "verified" | "rejected";
+  role: Role;
+};
+
+export type CategoryInput = {
+  code: string;
+  name: string;
+  distance_km: number;
+  price: number;
+  quota: number;
+  max_per_user: number;
+  bib_prefix: string;
+};
+
+export type PartnerCategory = CategoryInput & {
+  id: string;
+  sold: number;
+  pending: number;
+  locked: boolean;
+  has_orders: boolean;
+  remaining: number | null;
+};
+
+export type EventInput = {
+  name: string;
+  tagline: string;
+  description: string;
+  venue: string;
+  city: string;
+  race_date: string; // YYYY-MM-DD
+  start_time: string; // HH:MM
+  sale_open_at: string; // ISO dengan offset
+  sale_close_at: string;
+  racepack_info: string;
+  theme_color: string;
+  cover_url: string;
+};
+
+export type PartnerEvent = Omit<EventInput, "theme_color" | "cover_url"> & {
+  id: string;
+  slug: string;
+  status: "draft" | "published" | "closed";
+  theme_color: string | null;
+  cover_url: string | null;
+  has_orders: boolean;
+  categories: PartnerCategory[];
+  org: { name: string; kyc_status: OrgProfile["kyc_status"]; theme_color: string };
+};
+
+export type Member = { user_id: string; name: string; email: string; role: Role; joined_at: string };
+
+export const createOrg = (body: OrgInput) =>
+  apiFetch<{ slug: string; name: string; kyc_status: OrgProfile["kyc_status"] }>("/v1/orgs", { method: "POST", body });
+
+export const checkOrgSlug = (slug: string) =>
+  apiFetch<{ available: boolean; message?: string }>(`/v1/orgs/slug-check${qs({ slug })}`);
+
+export const updateOrgProfile = (org: string, body: Omit<OrgInput, "slug"> & { theme_color: string; logo_url: string }) =>
+  apiFetch<OrgProfile>(`/v1/org/${org}/profile`, { method: "PATCH", body });
+
+export function uploadImage(org: string, kind: "cover" | "logo", file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<{ url: string }>(`/v1/org/${org}/uploads${qs({ kind })}`, { method: "POST", form });
+}
+
+const ev = (org: string, id?: string, rest = "") => `/v1/org/${org}/events${id ? `/${id}` : ""}${rest}`;
+
+export const createEvent = (org: string, body: EventInput & { categories: CategoryInput[] }) =>
+  apiFetch<PartnerEvent>(ev(org), { method: "POST", body });
+export const updateEvent = (org: string, id: string, body: EventInput) => apiFetch<PartnerEvent>(ev(org, id), { method: "PATCH", body });
+export const eventAction = (org: string, id: string, action: "publish" | "unpublish" | "close") =>
+  apiFetch<PartnerEvent>(ev(org, id, `/${action}`), { method: "POST" });
+export const deleteEvent = (org: string, id: string) => apiFetch<void>(ev(org, id), { method: "DELETE" });
+export const createCategory = (org: string, id: string, body: CategoryInput) =>
+  apiFetch<PartnerEvent>(ev(org, id, "/categories"), { method: "POST", body });
+export const updateCategory = (org: string, id: string, catId: string, body: CategoryInput) =>
+  apiFetch<PartnerEvent>(ev(org, id, `/categories/${catId}`), { method: "PATCH", body });
+export const deleteCategory = (org: string, id: string, catId: string) =>
+  apiFetch<PartnerEvent>(ev(org, id, `/categories/${catId}`), { method: "DELETE" });
+
+export const addMember = (org: string, body: { email: string; role: Role }) =>
+  apiFetch<{ members: Member[] }>(`/v1/org/${org}/members`, { method: "POST", body });
+export const updateMember = (org: string, userId: string, role: Role) =>
+  apiFetch<{ members: Member[] }>(`/v1/org/${org}/members/${userId}`, { method: "PATCH", body: { role } });
+export const removeMember = (org: string, userId: string) =>
+  apiFetch<{ members: Member[] }>(`/v1/org/${org}/members/${userId}`, { method: "DELETE" });

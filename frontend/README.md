@@ -23,7 +23,11 @@ npm run build
 | `/masuk` | Masuk/daftar dengan email + kode 6 digit; `?next=/path` (hanya path relatif) untuk kembali setelah login |
 | `/akun` | Profil (nama, no. HP), peran mitra, keluar; `?baru=1&next=…` = "Lengkapi profil" setelah daftar |
 | `/tickets` | Tiket saya: tiket berbentuk BIB dengan QR |
-| `/org/[org]` | Dashboard mitra: penjualan & progres race pack per event |
+| `/daftar-mitra` | Daftarkan penyelenggara (login wajib): nama, alamat/slug dengan cek ketersediaan, kota, profil |
+| `/org/[org]` | Dashboard mitra, tab **Event**: status (Draft/Terbit/Ditutup), penjualan, progres race pack, Buat/Edit (owner/admin), scanner. `?baru=1` = banner setelah mendaftar |
+| `/org/[org]/tim` | Tab **Tim** (owner): tambah anggota by email, ubah peran, hapus |
+| `/org/[org]/profil` | Tab **Profil**: deskripsi, kota, instagram, situs, warna, logo (slug tidak bisa diubah) |
+| `/org/[org]/events/new`, `/org/[org]/events/[eventId]/edit` | Form event (`components/event-form.tsx`): informasi, poster, penjualan (WIB), tabel kategori (jadi kartu di HP), pratinjau kartu BIB, Simpan draft / Terbitkan / Tutup penjualan / Hapus draft dengan dialog konfirmasi |
 | `/org/[org]/events/[eventId]/scan` | Scanner race pack (kamera via `@zxing/browser`, input manual, pencarian nama/BIB) |
 
 ## Bahasa visual
@@ -51,3 +55,6 @@ src/
 - **Kamera scanner** butuh HTTPS atau `localhost`. Untuk mencoba dari HP di jaringan yang sama, pakai tunnel HTTPS (mis. `cloudflared tunnel --url http://localhost:3000`).
 - `cacheComponents` aktif (bawaan Next 16): komponen yang membaca `useParams`/`useSearchParams` dibungkus `<Suspense>` di `page.tsx`.
 - Baca `AGENTS.md` sebelum memakai AI coding agent — API Next 16 berbeda dari versi lama.
+- **Gambar unggahan** (poster, logo) dirender lewat `UploadedImage` (`components/ui-client.tsx`) dengan `API_URL + url`. Ukuran kotak ditentukan pemanggil, jadi gambar yang gagal dimuat tidak menggeser tata letak (fallback inisial/warna tema).
+- **Peran mitra** dibaca dari `me.orgs` (`roleIn`, `canEdit` di `lib/api.ts`); tombol yang butuh peran owner/admin disembunyikan untuk staf, server tetap memeriksa ulang.
+- **Uji browser**: Next 16 menyimpan halaman sebelumnya tersembunyi di DOM (`<Activity>`), jadi locator Playwright perlu `.filter({ visible: true })` setelah navigasi di sisi klien.

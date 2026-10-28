@@ -26,7 +26,8 @@ Satu user bisa menjadi pelari sekaligus staf di beberapa mitra (RBAC per tenant)
 3. Pembayaran Midtrans Snap (VA, QRIS, e-wallet, kartu) + webhook idempotent.
 4. Tiket QR + nomor BIB terbit otomatis, dikirim via email, tampil di **Tiket saya**.
 5. Dashboard mitra + scanner race pack di web yang sama.
-6. Ledger double-entry dan saldo mitra; pencairan via Midtrans Payouts (fase berikutnya).
+6. **Portal mitra mandiri**: siapa pun yang login bisa mendaftarkan penyelenggara, membuat event + kategori tiket, mengunggah poster/logo, menerbitkan event (setelah penyelenggara terverifikasi), dan mengundang staf. Tanpa campur tangan tim RaceGo selain verifikasi.
+7. Ledger double-entry dan saldo mitra; pencairan via Midtrans Payouts (fase berikutnya).
 
 Di luar MVP: aplikasi native, live tracking, hasil race/timing chip, marketplace merchandise.
 

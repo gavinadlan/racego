@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { UploadedImage } from "./ui-client";
 import { qs, type EventFilters, type EventSummary, type Organizer } from "@/lib/api";
 import { flagOffTime, formatDate, humanizeUntil, initials, textOn } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
@@ -78,7 +79,7 @@ export function Home() {
             {orgs.data.organizers.map((o) => (
               <li key={o.slug}>
                 <Link href={`/penyelenggara/${o.slug}`} className="flex items-center gap-3 rounded-md bg-card p-3 ring-1 ring-line hover:ring-asphalt">
-                  <Monogram name={o.name} color={o.theme_color} />
+                  <Monogram name={o.name} color={o.theme_color} logoUrl={o.logo_url} />
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-semibold">{o.name}</span>
                     <span className="block text-xs text-muted">{o.city}</span>
@@ -93,13 +94,16 @@ export function Home() {
   );
 }
 
-export function Monogram({ name, color, size = "sm" }: { name: string; color: string; size?: "sm" | "lg" }) {
+/** Logo penyelenggara; tanpa logo (atau gagal dimuat) tampil inisial di atas warna tema. */
+export function Monogram({ name, color, logoUrl, size = "sm" }: { name: string; color: string; logoUrl?: string | null; size?: "sm" | "lg" }) {
   const dim = size === "lg" ? "size-24 text-5xl" : "size-11 text-xl";
-  return (
+  const initialsBox = (
     <span className={`font-display grid shrink-0 place-items-center rounded-md font-black ${dim}`} style={{ background: color, color: textOn(color) }} aria-hidden>
       {initials(name)}
     </span>
   );
+  if (!logoUrl) return initialsBox;
+  return <UploadedImage url={logoUrl} alt={`Logo ${name}`} className={`shrink-0 rounded-md bg-white ${dim}`} fit="contain" fallback={initialsBox} />;
 }
 
 /** Hero kanan: BIB gelap besar dengan hitung mundur ke flag-off race terdekat. */

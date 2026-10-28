@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { EventSummary } from "@/lib/api";
 import { dayOfMonth, formatRupiah, monthKey, monthLong } from "@/lib/format";
 import { StatusPill } from "./bib";
+import { UploadedImage } from "./ui-client";
 
 /** Kelompokkan event per bulan (urutan mengikuti input). */
 export function groupByMonth(events: EventSummary[]) {
@@ -38,14 +39,21 @@ export function CalendarList({ events, empty }: { events: EventSummary[]; empty?
                     <div className="font-display text-4xl leading-none font-black">{dayOfMonth(e.race_date)}</div>
                     <div className="text-xs text-muted">{new Date(e.race_date).toLocaleDateString("id-ID", { weekday: "short" })}</div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 font-semibold group-hover:underline group-hover:underline-offset-4">
-                      <span className="size-2.5 shrink-0 rounded-full" style={{ background: e.theme_color }} aria-hidden />
-                      <span className="truncate">{e.name}</span>
-                    </p>
-                    <p className="mt-0.5 truncate text-sm text-muted">
-                      {e.city}, oleh {e.org_name}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    {e.cover_url && (
+                      <div className="h-12 w-10 shrink-0 overflow-hidden rounded-sm" style={{ background: e.theme_color }}>
+                        <UploadedImage url={e.cover_url} alt={`Poster ${e.name}`} className="size-full" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 font-semibold group-hover:underline group-hover:underline-offset-4">
+                        <span className="size-2.5 shrink-0 rounded-full" style={{ background: e.theme_color }} aria-hidden />
+                        <span className="truncate">{e.name}</span>
+                      </p>
+                      <p className="mt-0.5 truncate text-sm text-muted">
+                        {e.city}, oleh {e.org_name}
+                      </p>
+                    </div>
                   </div>
                   <div className="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-auto sm:justify-end">
                     <span className="font-display text-base font-bold">{e.distances.join(" / ")}</span>

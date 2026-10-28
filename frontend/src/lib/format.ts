@@ -76,3 +76,49 @@ export const DEV_USERS = [
   { id: "33333333-3333-3333-3333-333333333333", label: "Andi (staf RPC Jakarta)" },
   { id: "44444444-4444-4444-4444-444444444444", label: "Rina (owner Bandung Trail)" },
 ] as const;
+
+// ===== Waktu Indonesia Barat (form mitra) =====
+// Form event selalu memakai WIB (Asia/Jakarta, UTC+7 tanpa DST), apa pun zona waktu browser.
+
+const WIB_MS = 7 * 60 * 60 * 1000;
+
+/** ISO → nilai <input type="datetime-local"> dalam WIB ("2027-01-03T10:00"). */
+export function toWIBInput(iso: string) {
+  if (!iso) return "";
+  return new Date(new Date(iso).getTime() + WIB_MS).toISOString().slice(0, 16);
+}
+
+/** Nilai datetime-local (WIB) → ISO dengan offset +07:00. */
+export const fromWIBInput = (v: string) => (v ? `${v}:00+07:00` : "");
+
+const wibFmt = new Intl.DateTimeFormat("id-ID", {
+  timeZone: "Asia/Jakarta",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** "Sab, 3 Jan 2027 10.00 WIB" */
+export function formatWIB(iso: string) {
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return "";
+  const p = Object.fromEntries(wibFmt.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return `${p.weekday}, ${p.day} ${p.month} ${p.year} ${p.hour}.${p.minute} WIB`;
+}
+
+/** Tanggal hari ini di WIB, "YYYY-MM-DD". */
+export const todayWIB = (now = Date.now()) => new Date(now + WIB_MS).toISOString().slice(0, 10);
+
+/** "Café Run Été!" → "cafe-run-ete" (sama dengan aturan slug backend). */
+export function slugify(s: string) {
+  return s
+    .normalize("NFD")
+    .replace(/\p{Mn}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+}

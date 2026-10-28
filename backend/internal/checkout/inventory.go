@@ -21,16 +21,20 @@ var (
 	releaseSrc string
 	//go:embed lua/confirm.lua
 	confirmSrc string
+	//go:embed lua/adjust.lua
+	adjustSrc string
 
 	reserveScript = redis.NewScript(reserveSrc)
 	releaseScript = redis.NewScript(releaseSrc)
 	confirmScript = redis.NewScript(confirmSrc)
+	adjustScript  = redis.NewScript(adjustSrc)
 )
 
 var (
 	ErrSoldOut       = errors.New("kuota habis")
 	ErrLimitExceeded = errors.New("melebihi batas slot per akun")
 	ErrNotOpen       = errors.New("penjualan belum dibuka")
+	ErrBelowUsed     = errors.New("kuota baru lebih kecil dari slot yang terjual + sedang ditahan")
 )
 
 // ConfirmResult adalah hasil mengunci slot setelah pembayaran lunas.
@@ -82,6 +86,31 @@ func (inv *Inventory) Load(ctx context.Context, categoryID string, available int
 		return false, err
 	}
 	return ok, nil
+}
+
+// AdjustStock menambah/mengurangi stok sebesar delta (perubahan kuota) secara atomik.
+// loaded=false bila stok kategori belum ada di Redis (tidak ada yang diubah; nanti dimuat
+// dari kuota DB). ErrBelowUsed bila stok akan negatif; stock = stok saat itu.
+func (inv *Inventory) AdjustStock(ctx context.Context, categoryID string, delta int) (stock int, loaded bool, err error) {
+	res, err := adjustScript.Run(ctx, inv.rdb, []string{keysFor(categoryID).stock()}, delta).Int64Slice()
+	if err != nil {
+		return 0, false, err
+	}
+	switch res[0] {
+	case -1:
+		return 0, false, nil
+	case 0:
+		return int(res[1]), true, ErrBelowUsed
+	}
+	return int(res[1]), true, nil
+}
+
+// Drop menghapus stok kategori dari Redis (kategori/event dihapus sebelum ada order).
+func (inv *Inventory) Drop(ctx context.Context, categoryID string) error {
+	if err := inv.rdb.Del(ctx, keysFor(categoryID).stock()).Err(); err != nil {
+		return err
+	}
+	return inv.rdb.SRem(ctx, activeCategoriesKey, categoryID).Err()
 }
 
 // Available mengembalikan stok tersisa; ok=false bila kategori belum dimuat ke Redis.

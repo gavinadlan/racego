@@ -20,8 +20,11 @@ func TestSaleStatus(t *testing.T) {
 		{"race sudah lewat", now.Add(-2 * day), now.Add(-60 * day), now.Add(-5 * day), "finished"},
 	}
 	for _, c := range cases {
-		if got := saleStatus(now, c.race, c.open, c.close); got != c.want {
+		if got := saleStatus(now, c.race, c.open, c.close, "published"); got != c.want {
 			t.Errorf("%s: dapat %q, seharusnya %q", c.name, got, c.want)
 		}
+	}
+	if got := saleStatus(now, now.Add(30*day), now.Add(-day), now.Add(27*day), "closed"); got != "closed" {
+		t.Errorf("ditutup mitra: dapat %q", got)
 	}
 }

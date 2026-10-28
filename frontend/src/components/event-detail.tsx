@@ -11,7 +11,8 @@ import { PinHoles, StatusPill } from "./bib";
 import { BigCountdown } from "./clock";
 import { Monogram } from "./home";
 import { useSession } from "./session";
-import { btnDark, btnPrimary, ErrorBox, inputCls, Loading, LoginHint } from "./ui";
+import { btnDark, btnPrimary, ErrorBox, Field, inputCls, Loading, LoginHint } from "./ui";
+import { UploadedImage } from "./ui-client";
 
 export function EventDetailView() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -94,11 +95,16 @@ export function EventDetailView() {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+          {event.cover_url && (
+            <div className="aspect-[4/5] overflow-hidden rounded-md bg-card ring-1 ring-line">
+              <UploadedImage url={event.cover_url} alt={`Poster ${event.name}`} className="size-full" fit="contain" />
+            </div>
+          )}
           <StatusCard event={event} />
           <Link href={`/penyelenggara/${event.org.slug}`} className="group block rounded-md bg-card p-6 ring-1 ring-line hover:ring-asphalt">
             <p className="text-sm text-muted">Diselenggarakan oleh</p>
             <div className="mt-3 flex items-center gap-3">
-              <Monogram name={event.org.name} color={event.org.theme_color} />
+              <Monogram name={event.org.name} color={event.org.theme_color} logoUrl={event.org.logo_url} />
               <div className="min-w-0">
                 <p className="truncate font-semibold group-hover:underline group-hover:underline-offset-4">{event.org.name}</p>
                 <p className="text-sm text-muted">{event.org.city}</p>
@@ -248,26 +254,6 @@ const JERSEY = ["XS", "S", "M", "L", "XL", "XXL"];
 function localDate(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Label yang selalu terlihat di atas kolom, plus keterangan singkat di bawahnya. */
-function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-sm font-semibold">
-        {label}
-        {required ? (
-          <span className="ml-0.5 text-hivis" aria-hidden>
-            *
-          </span>
-        ) : (
-          <span className="ml-1 font-normal text-muted">(opsional)</span>
-        )}
-      </span>
-      {children}
-      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
-    </label>
-  );
 }
 
 function emptyParticipant(): Participant {

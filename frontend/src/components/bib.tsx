@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { EventStatus, EventSummary } from "@/lib/api";
 import { dayOfMonth, daysUntil, formatDateShort, formatRupiah, humanizeUntil, monthShort, textOn } from "@/lib/format";
 import { useNow } from "./clock";
+import { UploadedImage } from "./ui-client";
 
 /** Empat lubang peniti di sudut — ciri khas nomor dada pelari. */
 export function PinHoles() {
@@ -53,19 +54,24 @@ function TimeNote({ e }: { e: EventSummary }) {
  * Kartu event berbentuk BIB: pita warna penyelenggara, tanggal sebesar nomor dada,
  * lalu sobekan bawah berisi harga dan waktu.
  */
-export function EventBib({ e, size = "md" }: { e: EventSummary; size?: "md" | "lg" }) {
+export function EventBib({ e, size = "md", preview = false }: { e: EventSummary; size?: "md" | "lg"; preview?: boolean }) {
   const finished = e.status === "finished";
   const band = finished ? "#9aa0a6" : e.theme_color;
-  return (
-    <Link
-      href={`/events/${e.id}`}
-      className="group relative flex h-full flex-col overflow-hidden rounded-md bg-card shadow-[0_1px_0_#e1e3dd,0_8px_24px_-12px_rgb(35_39_46/0.25)] ring-1 ring-line transition-transform duration-200 hover:-rotate-[0.6deg] motion-reduce:transition-none"
-    >
+  const cls =
+    "group relative flex h-full flex-col overflow-hidden rounded-md bg-card shadow-[0_1px_0_#e1e3dd,0_8px_24px_-12px_rgb(35_39_46/0.25)] ring-1 ring-line transition-transform duration-200 hover:-rotate-[0.6deg] motion-reduce:transition-none";
+  const body = (
+    <>
       <PinHoles />
       <div className="flex items-center justify-between gap-3 px-6 pt-5 pb-3" style={{ background: band, color: textOn(band) }}>
         <span className="truncate text-sm font-semibold">{e.org_name}</span>
         <span className="text-xs font-semibold whitespace-nowrap opacity-90">{e.city}</span>
       </div>
+      {e.cover_url && (
+        // Kotak rasio tetap: bila poster gagal dimuat, warna pita tetap mengisi ruang tanpa menggeser isi kartu.
+        <div className="aspect-[16/9] overflow-hidden" style={{ background: band }}>
+          <UploadedImage url={e.cover_url} alt={`Poster ${e.name}`} className="size-full" />
+        </div>
+      )}
 
       <div className="flex flex-1 gap-5 px-6 pt-4 pb-5">
         <div className={`font-display shrink-0 text-center leading-[0.8] font-black ${finished ? "text-muted" : ""}`}>
@@ -95,6 +101,12 @@ export function EventBib({ e, size = "md" }: { e: EventSummary; size?: "md" | "l
           <TimeNote e={e} />
         </span>
       </div>
+    </>
+  );
+  if (preview) return <div className={cls}>{body}</div>;
+  return (
+    <Link href={`/events/${e.id}`} className={cls}>
+      {body}
     </Link>
   );
 }

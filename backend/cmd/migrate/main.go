@@ -4,6 +4,7 @@
 //	go run ./cmd/migrate seed   # isi data contoh (migrations/seed.sql)
 //	go run ./cmd/migrate reset  # jalankan semua *.down.sql (HAPUS data!)
 //	go run ./cmd/migrate grant <email> <org-slug> <role>  # jadikan akun anggota mitra
+//	go run ./cmd/migrate verify <org-slug>                # verifikasi mitra (boleh menerbitkan event)
 package main
 
 import (
@@ -27,7 +28,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>")
+		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>|verify <org-slug>")
 	}
 	ctx := context.Background()
 	cfg := config.Load()
@@ -55,6 +56,11 @@ func main() {
 			log.Fatal("pemakaian: migrate grant <email> <org-slug> <owner|admin|finance|rpc_staff>")
 		}
 		err = grant(ctx, db, os.Args[2], os.Args[3], tenant.Role(os.Args[4]))
+	case "verify":
+		if len(os.Args) != 3 {
+			log.Fatal("pemakaian: migrate verify <org-slug>")
+		}
+		err = verify(ctx, db, os.Args[2])
 	default:
 		err = fmt.Errorf("perintah tidak dikenal: %s", os.Args[1])
 	}
@@ -182,5 +188,23 @@ func grant(ctx context.Context, db *pgxpool.Pool, email, slug string, role tenan
 		return err
 	}
 	fmt.Printf("✓ %s (%s) sekarang %s di %s\n", userName, email, role, orgName)
+	return nil
+}
+
+// verify menandai mitra terverifikasi sehingga boleh menerbitkan event.
+func verify(ctx context.Context, db *pgxpool.Pool, slug string) error {
+	var name string
+	err := db.QueryRow(ctx, `UPDATE organizations SET kyc_status = 'verified' WHERE slug = $1 RETURNING name`, slug).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("mitra dengan slug %q tidak ditemukan", slug)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO audit_logs (org_id, action, entity, entity_id, after)
+		SELECT id, 'org.verified', 'organization', id::text, '{"kyc_status":"verified"}' FROM organizations WHERE slug = $1`, slug); err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s (%s) terverifikasi, sekarang bisa menerbitkan event\n", name, slug)
 	return nil
 }

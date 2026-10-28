@@ -25,7 +25,7 @@ export function OrganizerDirectory() {
             <li key={o.slug}>
               <Link href={`/penyelenggara/${o.slug}`} className="group flex h-full flex-col rounded-md bg-card p-6 ring-1 ring-line hover:ring-asphalt">
                 <div className="flex items-center gap-4">
-                  <Monogram name={o.name} color={o.theme_color} />
+                  <Monogram name={o.name} color={o.theme_color} logoUrl={o.logo_url} />
                   <div className="min-w-0">
                     <h2 className="truncate text-lg font-semibold group-hover:underline group-hover:underline-offset-4">{o.name}</h2>
                     <p className="text-sm text-muted">{o.city}</p>
@@ -64,9 +64,13 @@ export function OrganizerProfile() {
           ← Semua penyelenggara
         </Link>
         <div className="mt-6 flex flex-wrap items-end gap-6">
-          <span className="font-display grid size-24 place-items-center rounded-md bg-white/15 text-5xl font-black ring-2 ring-current/30" aria-hidden>
-            {initials(o.name)}
-          </span>
+          {o.logo_url ? (
+            <Monogram name={o.name} color={o.theme_color} logoUrl={o.logo_url} size="lg" />
+          ) : (
+            <span className="font-display grid size-24 place-items-center rounded-md bg-white/15 text-5xl font-black ring-2 ring-current/30" aria-hidden>
+              {initials(o.name)}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-5xl leading-[0.95] font-black text-balance sm:text-7xl">{o.name}</h1>
             <p className="mt-2 opacity-85">{o.city}</p>
@@ -83,7 +87,11 @@ export function OrganizerProfile() {
                 Situs web
               </a>
             )}
-            {o.instagram && <span>Instagram {o.instagram}</span>}
+            {o.instagram && (
+              <a href={`https://instagram.com/${o.instagram}`} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                Instagram @{o.instagram}
+              </a>
+            )}
           </div>
         </div>
       </section>

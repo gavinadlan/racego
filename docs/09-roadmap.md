@@ -8,12 +8,15 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] **Login Google**
 - [ ] **Profil pelari** (`runner_profiles`): isi sekali, prefill semua peserta
 - [ ] **Virtual waiting room** (Redis ZSET + token HMAC) dan Turnstile di tombol Daftar
-- [ ] **CRUD event & kategori** dari dashboard mitra (draft → review → published)
-- [ ] **Onboarding mitra**: daftar, upload dokumen, rekening, verifikasi super admin
+- [x] **CRUD event & kategori** dari dashboard mitra (draft → published → closed, kunci harga setelah ada penjualan, kuota disesuaikan atomik di Redis)
+- [x] **Onboarding mitra versi dasar**: daftar dari web, `kyc_status` + `make verify`
+- [ ] Verifikasi dokumen & rekening mitra, peran super admin
 - [ ] **Row-Level Security** Postgres untuk tabel milik mitra
 - [ ] Export peserta (CSV/XLSX) untuk mitra
-- [ ] Upload poster event & logo penyelenggara (kolom `cover_url`/`logo_url` sudah ada)
-- [ ] Undang staf RPC via email
+- [x] Upload poster event & logo penyelenggara (disk lokal, EXIF dibuang)
+- [ ] Pembersihan berkala gambar yang tidak dipakai; pindah ke S3/R2
+- [x] Undang staf versi dasar (tambah anggota yang sudah pernah login)
+- [ ] Undangan staf via email
 
 ## Fase 2 — keuangan
 

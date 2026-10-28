@@ -14,10 +14,10 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  ["Daftar sebagai penyelenggara", "Isi profil komunitas atau perusahaan dan rekening pencairan."],
-  ["Verifikasi", "Tim RaceGo mengecek dokumen dan rekening, biasanya dalam 3 hari kerja."],
-  ["Buat event", "Masukkan kategori, harga, kuota, jadwal penjualan, dan info race pack."],
-  ["Buka penjualan", "Bagikan tautan event. Pantau penjualan dan scan race pack dari dashboard."],
+  ["Daftar sebagai penyelenggara", "Masuk dengan email, lalu isi nama, kota, dan profil singkat komunitas atau perusahaanmu. Kurang dari dua menit."],
+  ["Buat event", "Isi info race, unggah poster, atur kategori, harga, kuota, dan jadwal penjualan. Tersimpan sebagai draft dulu."],
+  ["Verifikasi", "Tim RaceGo memverifikasi penyelenggara sebelum event pertama bisa terbit. Sambil menunggu, draft tetap bisa disiapkan."],
+  ["Terbitkan dan pantau", "Event langsung tampil di kalender. Pantau penjualan, undang staf, dan scan race pack dari dashboard."],
 ];
 
 export default function ForOrganizersPage() {
@@ -31,9 +31,9 @@ export default function ForOrganizersPage() {
           RaceGo menangani pendaftaran, pembayaran, tiket, dan pengambilan race pack untuk komunitas, EO, kampus, dan perusahaan yang menggelar race lari.
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-4">
-          <a href="mailto:mitra@racego.local?subject=Ingin%20jual%20tiket%20di%20RaceGo" className={btnPrimary}>
-            Hubungi tim mitra
-          </a>
+          <Link href="/daftar-mitra" className={btnPrimary}>
+            Daftarkan penyelenggara
+          </Link>
           <Link href="/penyelenggara" className="text-sm font-semibold underline decoration-hivis decoration-2 underline-offset-4">
             Lihat penyelenggara yang sudah bergabung
           </Link>

@@ -126,6 +126,7 @@ func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	if cat.EventStatus != "published" || now.Before(cat.SaleOpenAt) || !now.Before(cat.SaleCloseAt) {
+		// Status event di cache paling lama basi categoryCacheTTL (3 detik) setelah mitra menutup penjualan.
 		httpx.Error(w, http.StatusConflict, "sale_not_open", "Penjualan kategori ini sedang tidak dibuka")
 		return
 	}
@@ -261,6 +262,11 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	cat, err := h.loadCategory(ctx, categoryID)
 	if err != nil {
 		httpx.Internal(w, r, err)
+		return
+	}
+	// Reservasi dibuat saat event terbit; bila sejak itu event ditutup atau ditarik ke draft, tolak.
+	if cat.EventStatus != "published" {
+		httpx.Error(w, http.StatusConflict, "sale_not_open", "Penjualan event ini sudah ditutup penyelenggara")
 		return
 	}
 	subtotal := cat.Price * int64(hold.Qty)

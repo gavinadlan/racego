@@ -24,6 +24,9 @@ type Config struct {
 	QRPrivateKey   string // base64 seed Ed25519 (32 byte)
 	ReservationTTL time.Duration
 
+	AutoVerifyOrgs bool   // org baru langsung verified (default true hanya di development)
+	UploadDir      string // folder gambar unggahan (poster, logo)
+
 	SMTPAddr     string
 	SMTPUsername string // kosong untuk Mailpit; isi untuk Resend/penyedia SMTP lain
 	SMTPPassword string
@@ -34,8 +37,9 @@ type Config struct {
 const MockServerKey = "mock-server-key"
 
 func Load() Config {
+	env := get("APP_ENV", "development")
 	return Config{
-		Env:                  get("APP_ENV", "development"),
+		Env:                  env,
 		HTTPAddr:             get("HTTP_ADDR", ":8080"),
 		FrontendURL:          get("FRONTEND_URL", "http://localhost:3000"),
 		TrustedProxyHops:     getInt("TRUSTED_PROXY_HOPS", 0),
@@ -46,6 +50,8 @@ func Load() Config {
 		MidtransIsProduction: getBool("MIDTRANS_IS_PRODUCTION", false),
 		QRPrivateKey:         os.Getenv("QR_PRIVATE_KEY"),
 		ReservationTTL:       getDuration("RESERVATION_TTL", 15*time.Minute),
+		AutoVerifyOrgs:       getBool("AUTO_VERIFY_ORGS", env == "development"),
+		UploadDir:            get("UPLOAD_DIR", "./data/uploads"),
 		SMTPAddr:             get("SMTP_ADDR", "localhost:1025"),
 		SMTPUsername:         os.Getenv("SMTP_USERNAME"),
 		SMTPPassword:         os.Getenv("SMTP_PASSWORD"),

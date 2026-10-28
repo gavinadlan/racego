@@ -48,3 +48,15 @@ func Decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	}
 	return true
 }
+
+// Fields berisi pesan error per kolom form, mis. {"sale_close_at": "Harus setelah waktu buka"}.
+type Fields map[string]string
+
+// Validation menulis 422 {"error":"validation","message":…,"fields":{…}} agar form bisa
+// menampilkan pesan di bawah kolom yang salah.
+func Validation(w http.ResponseWriter, fields Fields) {
+	JSON(w, http.StatusUnprocessableEntity, struct {
+		ErrorBody
+		Fields Fields `json:"fields"`
+	}{ErrorBody{Error: "validation", Message: "Periksa kembali isian yang ditandai."}, fields})
+}

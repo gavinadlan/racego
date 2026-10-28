@@ -14,15 +14,15 @@ INSERT INTO runner_profiles (user_id, id_number, birth_date, gender, blood_type,
 ON CONFLICT DO NOTHING;
 
 INSERT INTO organizations (id, slug, name, kyc_status, fee_bps, city, theme_color, website, instagram, description) VALUES
-  ('aaaaaaaa-0000-0000-0000-000000000001', 'jakarta-runners', 'Jakarta Runners Club', 'verified', 300, 'Jakarta', '#FF5B23', 'https://jakartarunners.club', '@jakartarunners',
+  ('aaaaaaaa-0000-0000-0000-000000000001', 'jakarta-runners', 'Jakarta Runners Club', 'verified', 300, 'Jakarta', '#FF5B23', 'https://jakartarunners.club', 'jakartarunners',
    'Komunitas lari kota sejak 2014. Rutin menggelar latihan Selasa malam di GBK dan beberapa race road tiap tahun.'),
-  ('aaaaaaaa-0000-0000-0000-000000000002', 'bandung-trail', 'Bandung Trail Community', 'verified', 300, 'Bandung', '#1F8A5B', 'https://bandungtrail.id', '@bandungtrail',
+  ('aaaaaaaa-0000-0000-0000-000000000002', 'bandung-trail', 'Bandung Trail Community', 'verified', 300, 'Bandung', '#1F8A5B', 'https://bandungtrail.id', 'bandungtrail',
    'Penggemar lari bukit dan trail di Bandung Raya. Spesialis rute tanjakan Dago, Lembang, dan Tahura.'),
-  ('aaaaaaaa-0000-0000-0000-000000000003', 'lari-jogja', 'Lari Jogja Collective', 'verified', 300, 'Yogyakarta', '#2F4BD8', 'https://larijogja.id', '@larijogja',
+  ('aaaaaaaa-0000-0000-0000-000000000003', 'lari-jogja', 'Lari Jogja Collective', 'verified', 300, 'Yogyakarta', '#2F4BD8', 'https://larijogja.id', 'larijogja',
    'Kolektif pelari Yogyakarta yang membawa race ke jalanan bersejarah: Malioboro, Kotagede, sampai lereng Merapi.'),
-  ('aaaaaaaa-0000-0000-0000-000000000004', 'bali-coastal', 'Bali Coastal Run', 'verified', 300, 'Denpasar', '#0E8F9C', 'https://balicoastalrun.com', '@balicoastal',
+  ('aaaaaaaa-0000-0000-0000-000000000004', 'bali-coastal', 'Bali Coastal Run', 'verified', 300, 'Denpasar', '#0E8F9C', 'https://balicoastalrun.com', 'balicoastal',
    'Race pinggir pantai dan sawah di Bali, start sebelum matahari terbit supaya pelari tidak kepanasan.'),
-  ('aaaaaaaa-0000-0000-0000-000000000005', 'surabaya-night', 'Surabaya Night Runners', 'verified', 300, 'Surabaya', '#7A3FE0', 'https://sbynightrunners.id', '@surabayanight',
+  ('aaaaaaaa-0000-0000-0000-000000000005', 'surabaya-night', 'Surabaya Night Runners', 'verified', 300, 'Surabaya', '#7A3FE0', 'https://sbynightrunners.id', 'surabayanight',
    'Lari malam di Surabaya: jalanan lebih sejuk, kota lebih sepi, dan selalu ada kuliner di garis finish.')
 ON CONFLICT DO NOTHING;
 

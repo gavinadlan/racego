@@ -31,11 +31,15 @@ Batas free tier sering berubah — cek ulang sebelum deploy.
 1. Buat 2 VM Ampere A1 (1 OCPU, 6 GB masing-masing, Ubuntu 24.04) di satu VCN; buka port 5432/6379 hanya untuk subnet privat.
 2. VM 2: pasang Docker, jalankan Postgres + Redis (bisa memakai `docker-compose.yml` repo ini tanpa Mailpit), set password.
 3. VM 1: build image `backend/Dockerfile` dan frontend (`npm run build && npm start`), atau jalankan binary langsung via systemd.
-4. Isi `.env` produksi: `APP_ENV=production`, `TRUSTED_PROXY_HOPS=1` (lihat di bawah), `QR_PRIVATE_KEY` dari `make keygen`, `DATABASE_URL`/`REDIS_ADDR` ke IP privat VM 2, SMTP Resend.
+4. Isi `.env` produksi: `APP_ENV=production`, `AUTO_VERIFY_ORGS=false`, `UPLOAD_DIR` ke disk persisten (lihat di bawah), `TRUSTED_PROXY_HOPS=1` (lihat di bawah), `QR_PRIVATE_KEY` dari `make keygen`, `DATABASE_URL`/`REDIS_ADDR` ke IP privat VM 2, SMTP Resend.
 5. `cloudflared tunnel` dari VM 1 ke domain kamu (`racego.example` → web :3000, `api.racego.example` → :8080). Tidak perlu membuka port publik.
 6. Arahkan Notification URL Midtrans sandbox ke `https://api.racego.example/v1/webhooks/midtrans`.
 
 > Penting: di `APP_ENV` selain `development`, header `X-User-ID` diabaikan. Login memakai email + kode OTP (lihat [07-api](07-api.md)).
+
+### Gambar unggahan (`UPLOAD_DIR`)
+
+Poster & logo mitra disimpan sebagai file di `UPLOAD_DIR` (default `./data/uploads` relatif ke folder backend). Di VM, arahkan ke **disk persisten** (mis. block volume `/srv/racego/uploads`, bukan folder sementara / layer container) dan masukkan ke **backup** bersama dump Postgres: DB hanya menyimpan path-nya, jadi kehilangan folder ini = poster & logo rusak. Nama file = hash isi, jadi aman di-cache Cloudflare selamanya.
 
 ### IP klien di belakang proxy (`TRUSTED_PROXY_HOPS`)
 

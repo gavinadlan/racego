@@ -50,10 +50,13 @@ type Summary struct {
 }
 
 // saleStatus diturunkan dari tanggal, bukan disimpan, supaya selalu akurat.
-func saleStatus(now, raceDate, open, close time.Time) string {
+// dbStatus "closed" = mitra menutup penjualan lebih awal.
+func saleStatus(now, raceDate, open, close time.Time, dbStatus string) string {
 	switch {
 	case !raceDate.Add(24 * time.Hour).After(now):
 		return "finished"
+	case dbStatus == "closed":
+		return "closed"
 	case now.Before(open):
 		return "upcoming"
 	case now.Before(close):
@@ -66,19 +69,20 @@ func saleStatus(now, raceDate, open, close time.Time) string {
 const summarySelect = `
 	SELECT e.id, e.slug, e.name, e.tagline, e.city, e.venue, e.race_date, e.start_time,
 	       e.sale_open_at, e.sale_close_at, COALESCE(e.theme_color, o.theme_color), e.cover_url,
-	       o.name, o.slug, min(c.price), array_agg(c.code ORDER BY c.distance_km)
+	       o.name, o.slug, min(c.price), array_agg(c.code ORDER BY c.distance_km), e.status
 	FROM events e
 	JOIN organizations o ON o.id = e.org_id
 	JOIN ticket_categories c ON c.event_id = e.id
-	WHERE e.status IN ('published', 'closed')`
+	WHERE e.status IN ('published', 'closed') AND o.kyc_status = 'verified'`
 
 func scanSummaries(rows pgx.Rows) ([]Summary, error) {
 	now := time.Now()
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) {
 		var s Summary
+		var dbStatus string
 		err := row.Scan(&s.ID, &s.Slug, &s.Name, &s.Tagline, &s.City, &s.Venue, &s.RaceDate, &s.StartTime,
-			&s.SaleOpenAt, &s.SaleCloseAt, &s.ThemeColor, &s.CoverURL, &s.OrgName, &s.OrgSlug, &s.MinPrice, &s.Distances)
-		s.Status = saleStatus(now, s.RaceDate, s.SaleOpenAt, s.SaleCloseAt)
+			&s.SaleOpenAt, &s.SaleCloseAt, &s.ThemeColor, &s.CoverURL, &s.OrgName, &s.OrgSlug, &s.MinPrice, &s.Distances, &dbStatus)
+		s.Status = saleStatus(now, s.RaceDate, s.SaleOpenAt, s.SaleCloseAt, dbStatus)
 		return s, err
 	})
 }
@@ -173,7 +177,8 @@ func (h *Handler) Filters(w http.ResponseWriter, r *http.Request) {
 	var cities, distances []string
 	if err := h.db.QueryRow(r.Context(), `
 		SELECT COALESCE(array_agg(DISTINCT e.city ORDER BY e.city), '{}')
-		FROM events e WHERE e.status IN ('published', 'closed') AND e.race_date >= current_date`).Scan(&cities); err != nil {
+		FROM events e JOIN organizations o ON o.id = e.org_id
+		WHERE e.status IN ('published', 'closed') AND o.kyc_status = 'verified' AND e.race_date >= current_date`).Scan(&cities); err != nil {
 		httpx.Internal(w, r, err)
 		return
 	}
@@ -181,7 +186,8 @@ func (h *Handler) Filters(w http.ResponseWriter, r *http.Request) {
 		SELECT COALESCE(array_agg(code ORDER BY km), '{}') FROM (
 			SELECT c.code, min(c.distance_km) AS km FROM ticket_categories c
 			JOIN events e ON e.id = c.event_id
-			WHERE e.status IN ('published', 'closed') AND e.race_date >= current_date
+			JOIN organizations o ON o.id = e.org_id
+			WHERE e.status IN ('published', 'closed') AND o.kyc_status = 'verified' AND e.race_date >= current_date
 			GROUP BY c.code) d`).Scan(&distances); err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -202,11 +208,12 @@ type Category struct {
 }
 
 type OrgBrief struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	City        string `json:"city"`
-	Description string `json:"description"`
-	ThemeColor  string `json:"theme_color"`
+	Slug        string  `json:"slug"`
+	Name        string  `json:"name"`
+	City        string  `json:"city"`
+	Description string  `json:"description"`
+	ThemeColor  string  `json:"theme_color"`
+	LogoURL     *string `json:"logo_url"`
 }
 
 type Detail struct {
@@ -225,16 +232,17 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var d Detail
+	var dbStatus string
 	err = h.db.QueryRow(r.Context(), `
 		SELECT e.id, e.slug, e.name, e.tagline, e.city, e.venue, e.race_date, e.start_time,
 		       e.sale_open_at, e.sale_close_at, COALESCE(e.theme_color, o.theme_color), e.cover_url,
 		       o.name, o.slug, e.description, e.racepack_info,
-		       o.slug, o.name, o.city, o.description, o.theme_color
+		       o.slug, o.name, o.city, o.description, o.theme_color, o.logo_url, e.status
 		FROM events e JOIN organizations o ON o.id = e.org_id
-		WHERE e.id = $1 AND e.status IN ('published', 'closed')`, id,
+		WHERE e.id = $1 AND e.status IN ('published', 'closed') AND o.kyc_status = 'verified'`, id,
 	).Scan(&d.ID, &d.Slug, &d.Name, &d.Tagline, &d.City, &d.Venue, &d.RaceDate, &d.StartTime,
 		&d.SaleOpenAt, &d.SaleCloseAt, &d.ThemeColor, &d.CoverURL, &d.OrgName, &d.OrgSlug, &d.Description, &d.RacepackInfo,
-		&d.Org.Slug, &d.Org.Name, &d.Org.City, &d.Org.Description, &d.Org.ThemeColor)
+		&d.Org.Slug, &d.Org.Name, &d.Org.City, &d.Org.Description, &d.Org.ThemeColor, &d.Org.LogoURL, &dbStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(w, http.StatusNotFound, "event_not_found", "Event tidak ditemukan")
 		return
@@ -243,7 +251,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	d.Status = saleStatus(time.Now(), d.RaceDate, d.SaleOpenAt, d.SaleCloseAt)
+	d.Status = saleStatus(time.Now(), d.RaceDate, d.SaleOpenAt, d.SaleCloseAt, dbStatus)
 
 	rows, err := h.db.Query(r.Context(), `
 		SELECT id, code, name, distance_km::float8, price, quota, max_per_user
