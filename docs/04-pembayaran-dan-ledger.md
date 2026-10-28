@@ -5,11 +5,20 @@
 | Mode | Kapan | Cara |
 | --- | --- | --- |
 | **Mock** (default) | `MIDTRANS_SERVER_KEY` kosong | Token palsu; halaman order punya tombol *Simulasikan bayar berhasil / kedaluwarsa* yang memanggil `POST /v1/dev/orders/{id}/simulate`. Notifikasi dibuat dengan signature valid dan diproses lewat jalur yang **sama persis** dengan webhook asli. |
-| **Sandbox** | Isi `MIDTRANS_SERVER_KEY` + `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY` dari [dashboard sandbox](https://dashboard.sandbox.midtrans.com) | Popup Snap asli, bayar dengan simulator Midtrans. Webhook butuh URL publik (lihat bawah). |
+| **Sandbox** | Isi `MIDTRANS_SERVER_KEY` + `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY` dari [dashboard sandbox](https://dashboard.sandbox.midtrans.com) | Popup Snap asli, bayar dengan simulator Midtrans. Tanpa URL publik pun order tetap terdeteksi lunas lewat cek status langsung (lihat bawah). |
 
-### Menerima webhook sandbox di laptop
+### Cek status langsung (cadangan webhook)
 
-Midtrans harus bisa memanggil API kamu dari internet:
+Webhook tidak bisa sampai ke `localhost`, dan di produksi pun bisa terlambat. Karena itu backend juga **bertanya sendiri** ke Midtrans lewat `GET /v2/{order_id}/status` (`backend/internal/payment/status.go`):
+
+- **Saat halaman order dibuka**: `GET /v1/orders/{id}` untuk order yang masih `pending`/`expired` mengecek ke Midtrans, paling sering sekali per 4 detik per order.
+- **Worker tiap menit**: mengecek order belum lunas dalam 24 jam terakhir yang belum punya status akhir dari Midtrans.
+
+Hasilnya diproses lewat fungsi yang sama dengan webhook (`processVerified`), jadi tetap idempotent: kalau webhook dan cek status datang bersamaan, tiket hanya terbit sekali. Di mode mock fitur ini mati.
+
+### Menerima webhook sandbox di laptop (opsional)
+
+Supaya status berubah seketika (tanpa menunggu cek status), Midtrans harus bisa memanggil API kamu dari internet:
 
 ```bash
 cloudflared tunnel --url http://localhost:8080   # gratis, tanpa akun

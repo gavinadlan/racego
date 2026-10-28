@@ -53,7 +53,7 @@ make dev        # API :8080, worker, web :3000
 | `password authentication failed for user "racego"` padahal password benar | Ada Postgres lain di Mac yang mendengarkan di `localhost` pada port yang sama; macOS mengarahkan koneksi ke situ, bukan ke Docker. Cek dengan `sudo lsof -nP -iTCP:55432 -sTCP:LISTEN`, lalu pindahkan port (baris di bawah) |
 | Port 55432/6380 sudah dipakai | Ubah port di `docker-compose.yml` dan `DATABASE_URL`/`REDIS_ADDR` di `.env` |
 | Halaman web "Tidak bisa terhubung ke server" | API belum jalan atau `NEXT_PUBLIC_API_URL` salah |
-| Tiket tidak muncul setelah bayar | Worker belum jalan (`make worker`) |
+| Tiket tidak muncul setelah bayar | Worker belum jalan (`make worker`). Di sandbox: buka halaman order-nya (status dicek langsung ke Midtrans) atau tunggu ±1 menit |
 | Kategori selalu `sale_not_open` | Jam penjualan seed sudah lewat 60 hari → `make db-reset` |
 | Kamera scanner tidak mau menyala | Browser butuh HTTPS atau `localhost`; dari HP pakai `cloudflared tunnel --url http://localhost:3000` |
 | `go: missing go.sum entry` | Jalankan `cd backend && go mod tidy` |

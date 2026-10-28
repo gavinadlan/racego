@@ -30,6 +30,7 @@ type Handler struct {
 	snap        payment.SnapClient
 	ttl         time.Duration
 	frontendURL string
+	refresher   StatusRefresher // nil di mode mock
 
 	// Cache info kategori beberapa detik: saat war tiket ribuan request membaca baris yang sama,
 	// jadi cukup satu query per kategori per periode, bukan satu query per request.
@@ -342,8 +343,28 @@ func (h *Handler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "order_not_found", "Order tidak ditemukan")
 		return
 	}
+	// Belum lunas menurut kita? Tanyakan langsung ke Midtrans (berguna saat webhook tidak sampai,
+	// mis. development di localhost). Gagal bertanya bukan error bagi pembeli: tampilkan status lama.
+	if h.refresher != nil && !o.Mock && (o.Status == "pending" || o.Status == "expired") {
+		changed, err := h.refresher.Refresh(r.Context(), orderID.String())
+		if err != nil {
+			slog.WarnContext(r.Context(), "cek status midtrans gagal", "order_id", orderID, "err", err)
+		} else if changed {
+			if o2, ok2, err2 := h.findOrder(r.Context(), `id = $1`, orderID); err2 == nil && ok2 {
+				o = o2
+			}
+		}
+	}
 	httpx.JSON(w, http.StatusOK, o)
 }
+
+// StatusRefresher menanyakan status pembayaran langsung ke payment gateway.
+type StatusRefresher interface {
+	Refresh(ctx context.Context, orderID string) (changed bool, err error)
+}
+
+// SetRefresher mengaktifkan pengecekan status langsung di GetOrder (tidak dipakai di mode mock).
+func (h *Handler) SetRefresher(r StatusRefresher) { h.refresher = r }
 
 func (h *Handler) findOrder(ctx context.Context, where string, args ...any) (OrderResponse, bool, error) {
 	var o OrderResponse

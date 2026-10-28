@@ -11,6 +11,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/notify"
+	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 	"github.com/gavinadlan/racego/backend/internal/worker"
@@ -42,6 +43,11 @@ func main() {
 
 	w := worker.New(db, checkout.NewInventory(rdb), signer,
 		notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom), cfg.FrontendURL)
+	if !cfg.MidtransMock() {
+		// Cadangan webhook: cek status order ke Midtrans tiap menit (wajib saat development di localhost).
+		w.WithReconciler(payment.NewReconciler(
+			payment.NewProcessor(db, cfg.SigningKey()), cfg.MidtransServerKey, cfg.MidtransIsProduction))
+	}
 	slog.Info("worker berjalan")
 	w.Run(ctx)
 	slog.Info("worker berhenti")

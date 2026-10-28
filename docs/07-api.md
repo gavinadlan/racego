@@ -30,7 +30,7 @@ Autentikasi sementara (development saja): header `X-User-ID: <uuid user>`.
 | GET | `/v1/me` | | profil + daftar mitra & peran |
 | POST | `/v1/categories/{categoryID}/reservations` | `{"qty": 2}` | 201 `reservation_id`, `expires_at`, `remaining` · 409 `sold_out` / `limit_exceeded` / `sale_not_open` |
 | POST | `/v1/orders` | header `Idempotency-Key`; `{"category_id","reservation_id","participants":[…]}` | 201 `order_id`, `snap_token`, `redirect_url`, `mock` · 410 `reservation_expired` · 409 `reservation_used` · 422 validasi peserta |
-| GET | `/v1/orders/{orderID}` | | status order (untuk polling) |
+| GET | `/v1/orders/{orderID}` | | status order (untuk polling); bila belum lunas & bukan mock, sekalian cek status ke Midtrans |
 | GET | `/v1/me/tickets` | | tiket + `qr_token` + BIB |
 
 Objek peserta:

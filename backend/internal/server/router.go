@@ -33,6 +33,9 @@ func NewRouter(d Deps) http.Handler {
 	events := event.NewHandler(d.DB, d.Inv)
 	co := checkout.NewHandler(d.DB, d.Inv, d.Snap, d.Cfg.ReservationTTL, d.Cfg.FrontendURL)
 	pay := payment.NewProcessor(d.DB, d.Cfg.SigningKey())
+	if !d.Cfg.MidtransMock() {
+		co.SetRefresher(payment.NewReconciler(pay, d.Cfg.MidtransServerKey, d.Cfg.MidtransIsProduction))
+	}
 	tickets := ticket.NewHandler(d.DB, d.Signer)
 
 	r := chi.NewRouter()

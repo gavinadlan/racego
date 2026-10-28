@@ -17,6 +17,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/ledger"
 	"github.com/gavinadlan/racego/backend/internal/notify"
+	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 )
 
@@ -33,6 +34,13 @@ type Worker struct {
 	signer      *ticket.Signer
 	mailer      *notify.Mailer
 	frontendURL string
+	reconciler  *payment.Reconciler // nil di mode mock
+}
+
+// WithReconciler mengaktifkan pengecekan berkala status order ke Midtrans.
+func (w *Worker) WithReconciler(r *payment.Reconciler) *Worker {
+	w.reconciler = r
+	return w
 }
 
 func New(db *pgxpool.Pool, inv *checkout.Inventory, signer *ticket.Signer, mailer *notify.Mailer, frontendURL string) *Worker {
@@ -44,17 +52,22 @@ func (w *Worker) Run(ctx context.Context) {
 	outbox := time.NewTicker(500 * time.Millisecond)
 	holds := time.NewTicker(15 * time.Second)
 	sync := time.NewTicker(30 * time.Second)
+	reconcile := time.NewTicker(time.Minute)
 	defer outbox.Stop()
 	defer holds.Stop()
 	defer sync.Stop()
+	defer reconcile.Stop()
 
 	w.syncStock(ctx)
+	w.reconcilePayments(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-outbox.C:
 			w.drainOutbox(ctx)
+		case <-reconcile.C:
+			w.reconcilePayments(ctx)
 		case <-holds.C:
 			w.expireOrders(ctx)
 			w.releaseExpiredHolds(ctx)
@@ -247,6 +260,39 @@ func (w *Worker) syncStock(ctx context.Context) {
 }
 
 // expireOrders menandai order pending yang lewat waktu lalu mengantrekan pengembalian slot.
+// reconcilePayments menanyakan ke Midtrans status order yang belum lunas dalam 24 jam terakhir,
+// selama Midtrans belum memberi status akhir. Menangkap pembayaran yang webhook-nya tidak sampai.
+func (w *Worker) reconcilePayments(ctx context.Context) {
+	if w.reconciler == nil {
+		return
+	}
+	rows, err := w.db.Query(ctx, `
+		SELECT o.id FROM orders o
+		WHERE o.status IN ('pending', 'expired')
+		  AND o.created_at > now() - interval '24 hours'
+		  AND o.snap_token IS NOT NULL AND o.snap_token NOT LIKE 'mock-%'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM payment_events pe
+		    WHERE pe.order_id = o.id
+		      AND pe.transaction_status IN ('settlement', 'capture', 'expire', 'cancel', 'deny', 'failure'))
+		ORDER BY o.created_at DESC
+		LIMIT 50`)
+	if err != nil {
+		slog.ErrorContext(ctx, "reconcile: daftar order", "err", err)
+		return
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		slog.ErrorContext(ctx, "reconcile: daftar order", "err", err)
+		return
+	}
+	for _, id := range ids {
+		if _, err := w.reconciler.Check(ctx, id.String()); err != nil {
+			slog.WarnContext(ctx, "reconcile: cek status midtrans", "order_id", id, "err", err)
+		}
+	}
+}
+
 func (w *Worker) expireOrders(ctx context.Context) {
 	err := pgx.BeginFunc(ctx, w.db, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `

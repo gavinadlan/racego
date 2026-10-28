@@ -46,6 +46,12 @@ func (p *Processor) Process(ctx context.Context, n Notification, raw []byte) (Ou
 	if !n.Verify(p.signingKey) {
 		return "", ErrBadSignature
 	}
+	return p.processVerified(ctx, n, raw)
+}
+
+// processVerified dipakai setelah keaslian data dipastikan: lewat signature (webhook)
+// atau karena data diambil sendiri dari API Midtrans memakai server key (Reconciler).
+func (p *Processor) processVerified(ctx context.Context, n Notification, raw []byte) (Outcome, error) {
 	orderID, err := uuid.Parse(n.OrderID)
 	if err != nil {
 		return OutcomeIgnored, nil // bukan order dari sistem ini (mis. tes dari dashboard)
