@@ -238,6 +238,32 @@ function CategoryPicker({ event, onReserved }: { event: EventDetail; onReserved:
 
 const JERSEY = ["XS", "S", "M", "L", "XL", "XXL"];
 
+/** YYYY-MM-DD menurut zona waktu browser (untuk batas input tanggal). */
+function localDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Label yang selalu terlihat di atas kolom, plus keterangan singkat di bawahnya. */
+function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-semibold">
+        {label}
+        {required ? (
+          <span className="ml-0.5 text-hivis" aria-hidden>
+            *
+          </span>
+        ) : (
+          <span className="ml-1 font-normal text-muted">(opsional)</span>
+        )}
+      </span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
+    </label>
+  );
+}
+
 function emptyParticipant(): Participant {
   return { full_name: "", email: "", id_number: "", birth_date: "", gender: "", jersey_size: "", emergency_name: "", emergency_phone: "" };
 }
@@ -267,6 +293,7 @@ function CheckoutForm({
   // Satu kunci per reservasi: klik ganda / retry tidak membuat order dobel.
   const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
   const remaining = new Date(reservation.expires_at).getTime() - now;
+  const today = localDate(now);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -327,27 +354,56 @@ function CheckoutForm({
         </div>
       </div>
 
+      <p className="text-sm text-muted">
+        Data peserta dipakai untuk nomor BIB, asuransi, dan pencocokan KTP saat pengambilan race pack. Kolom bertanda{" "}
+        <span className="font-semibold text-hivis">*</span> wajib diisi.
+      </p>
+
       {participants.map((p, i) => (
         <fieldset key={i} className="rounded-md bg-card p-6 ring-1 ring-line">
           <legend className="font-display px-1 text-2xl font-extrabold">Peserta {i + 1}</legend>
-          <div className="mt-2 grid gap-3 sm:grid-cols-2">
-            <input className={inputCls} placeholder="Nama lengkap (sesuai KTP)" required value={p.full_name} onChange={(e) => update(i, "full_name", e.target.value)} />
-            <input className={inputCls} placeholder="Email" type="email" required value={p.email} onChange={(e) => update(i, "email", e.target.value)} />
-            <input className={inputCls} placeholder="NIK / nomor paspor" required minLength={6} value={p.id_number} onChange={(e) => update(i, "id_number", e.target.value)} />
-            <input className={inputCls} type="date" aria-label="Tanggal lahir" value={p.birth_date} onChange={(e) => update(i, "birth_date", e.target.value)} />
-            <select className={inputCls} value={p.gender} onChange={(e) => update(i, "gender", e.target.value)} aria-label="Gender">
-              <option value="">Gender (opsional)</option>
-              <option value="M">Laki-laki</option>
-              <option value="F">Perempuan</option>
-            </select>
-            <select className={inputCls} required value={p.jersey_size} onChange={(e) => update(i, "jersey_size", e.target.value)} aria-label="Ukuran jersey">
-              <option value="">Ukuran jersey</option>
-              {JERSEY.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <input className={inputCls} placeholder="Kontak darurat (nama)" value={p.emergency_name} onChange={(e) => update(i, "emergency_name", e.target.value)} />
-            <input className={inputCls} placeholder="Kontak darurat (no. HP)" value={p.emergency_phone} onChange={(e) => update(i, "emergency_phone", e.target.value)} />
+          {i === 0 && me && <p className="text-sm text-muted">Nama dan email diisi dari akun kamu. Ubah bila slot ini untuk orang lain.</p>}
+
+          <h3 className="mt-4 text-xs font-semibold tracking-wide text-muted uppercase">Data diri</h3>
+          <div className="mt-2 grid gap-4 sm:grid-cols-2">
+            <Field label="Nama lengkap" required hint="Sesuai KTP / paspor">
+              <input className={inputCls} required autoComplete="name" placeholder="mis. Budi Santoso" value={p.full_name} onChange={(e) => update(i, "full_name", e.target.value)} />
+            </Field>
+            <Field label="Email" required hint="Tiket & info race dikirim ke sini">
+              <input className={inputCls} type="email" required autoComplete="email" placeholder="nama@email.com" value={p.email} onChange={(e) => update(i, "email", e.target.value)} />
+            </Field>
+            <Field label="NIK / nomor paspor" required hint="16 digit NIK di KTP, atau nomor paspor untuk WNA">
+              <input className={inputCls} required minLength={6} maxLength={32} placeholder="3171xxxxxxxxxxxx" value={p.id_number} onChange={(e) => update(i, "id_number", e.target.value)} />
+            </Field>
+            <Field label="Tanggal lahir" hint="Untuk kategori usia & asuransi">
+              <input className={inputCls} type="date" min="1920-01-01" max={today} autoComplete="bday" value={p.birth_date} onChange={(e) => update(i, "birth_date", e.target.value)} />
+            </Field>
+            <Field label="Jenis kelamin">
+              <select className={inputCls} value={p.gender} onChange={(e) => update(i, "gender", e.target.value)}>
+                <option value="">Pilih…</option>
+                <option value="M">Laki-laki</option>
+                <option value="F">Perempuan</option>
+              </select>
+            </Field>
+            <Field label="Ukuran jersey" required hint="Ukuran tidak bisa diganti setelah bayar">
+              <select className={inputCls} required value={p.jersey_size} onChange={(e) => update(i, "jersey_size", e.target.value)}>
+                <option value="">Pilih ukuran…</option>
+                {JERSEY.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          <h3 className="mt-6 text-xs font-semibold tracking-wide text-muted uppercase">Kontak darurat</h3>
+          <p className="mt-1 text-sm text-muted">Orang yang dihubungi panitia bila terjadi sesuatu saat race. Jangan isi dengan nomor peserta sendiri.</p>
+          <div className="mt-2 grid gap-4 sm:grid-cols-2">
+            <Field label="Nama kontak darurat" hint="mis. orang tua, pasangan, teman">
+              <input className={inputCls} placeholder="mis. Ibu Siti" value={p.emergency_name} onChange={(e) => update(i, "emergency_name", e.target.value)} />
+            </Field>
+            <Field label="No. HP kontak darurat">
+              <input className={inputCls} type="tel" inputMode="tel" autoComplete="off" placeholder="08xxxxxxxxxx" value={p.emergency_phone} onChange={(e) => update(i, "emergency_phone", e.target.value)} />
+            </Field>
           </div>
         </fieldset>
       ))}
