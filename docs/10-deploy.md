@@ -92,7 +92,7 @@ cp .env.prod.example .env.prod
 scripts/gen-secrets.sh
 ```
 
-`gen-secrets.sh` mengisi `POSTGRES_USER`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, dan `QR_PRIVATE_KEY` dengan nilai acak, tanpa mencetaknya. Nilai yang sudah terisi tidak akan ditimpa tanpa konfirmasi.
+`gen-secrets.sh` mengisi `POSTGRES_USER`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QUEUE_SECRET` (kunci pass antrian virtual), dan `QR_PRIVATE_KEY` dengan nilai acak, tanpa mencetaknya. Untuk `.env.prod` lama yang belum punya `QUEUE_SECRET`, cukup jalankan skrip ini lagi: hanya yang kosong yang diisi. Nilai yang sudah terisi tidak akan ditimpa tanpa konfirmasi.
 
 > **Kunci QR jangan pernah berubah.** `QR_PRIVATE_KEY` menandatangani QR setiap tiket. Kalau diganti, semua tiket yang sudah terbit ditolak scanner. Salin `.env.prod` (minimal kunci ini) ke pengelola password **sekarang**. Kehilangan file ini sama dengan kehilangan tiket.
 
@@ -104,6 +104,7 @@ Buka `.env.prod` (`nano .env.prod`) dan isi:
 | `SMTP_ADDR`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_FROM` | **Gmail:** `smtp.gmail.com:587`, alamat Gmail, dan [App Password](https://support.google.com/accounts/answer/185833) (bukan password akun; butuh verifikasi 2 langkah). **Resend:** `smtp.resend.com:587`, user `resend`, password = API key. Tanpa SMTP, kode masuk tidak terkirim. |
 | `MIDTRANS_SERVER_KEY`, `MIDTRANS_CLIENT_KEY` | Kunci **sandbox** dari [dashboard.sandbox.midtrans.com](https://dashboard.sandbox.midtrans.com) (*Settings → Access Keys*). Kosongkan keduanya untuk mode mock: tombol "Simulasikan bayar" muncul. `MIDTRANS_IS_PRODUCTION` tetap `false`. |
 | `AUTO_VERIFY_ORGS` | `false` (default aman): penyelenggara baru harus diverifikasi manual sebelum bisa menerbitkan event. Untuk demo boleh `true`. |
+| `QUEUE_*` (opsional) | Antrian virtual untuk event yang mencentangnya: `QUEUE_LOBBY_MINUTES` (15), `QUEUE_ADMIT_PER_SEC` (20), `QUEUE_MAX_ACTIVE` (300), `QUEUE_PASS_TTL` (10m), `QUEUE_HEARTBEAT_TTL` (45s). Default cocok untuk server 2 CPU; arti tiap nilai di [03-war-tiket](03-war-tiket.md#parameter-env). |
 
 `FRONTEND_URL` tidak perlu diisi; nilainya otomatis `https://$SITE_ADDRESS`. Pengaturan produksi lain sudah dipasang di `docker-compose.prod.yml`: `APP_ENV=production`, dev login mati, dan `UPLOAD_DIR=/data/uploads` di volume.
 
@@ -195,6 +196,7 @@ Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worke
 - [ ] Menu **Akun contoh (dev)** tidak ada; `curl -H 'X-User-ID: 11111111-1111-1111-1111-111111111111' https://SITE_ADDRESS/v1/me` → 401.
 - [ ] `AUTO_VERIFY_ORGS=false` (kecuali memang demo).
 - [ ] `QR_PRIVATE_KEY` baru dari `gen-secrets.sh` (bukan kunci dev), dan salinannya tersimpan di luar server.
+- [ ] `QUEUE_SECRET` terisi (≥ 32 karakter, dari `gen-secrets.sh`); tanpa itu api dan worker menolak start.
 - [ ] Password Postgres/Redis acak dari `gen-secrets.sh`; `.env.prod` hanya bisa dibaca pemiliknya (`ls -l .env.prod` → `-rw-------`).
 - [ ] Hanya 22/80/443 terbuka: dari laptop, `nc -zv IP_SERVER 5432` dan `nc -zv IP_SERVER 6379` harus gagal.
 - [ ] `PROXY_MODE` dan `TRUSTED_PROXY_HOPS` sesuai topologi (tabel di bawah), lalu `scripts/check-ip-spoof.sh https://SITE_ADDRESS emailmu@gmail.com` → LULUS. Skrip ini mengirim sampai 20 email kode ke `emailmu+ipcekN@…` dan memakai jatah kode IP-mu selama 1 jam.
@@ -270,5 +272,5 @@ Tanpa janji. Batas layanan gratis sering berubah, jadi cek halaman resminya sebe
 | **Email kode tidak terkirim** (pesan "Email berisi kode gagal dikirim") | `make prod-logs S=api`, cari `kirim email`. Gmail butuh App Password dan port 587. Cek folder spam. Resend Free hanya boleh mengirim dari domain terverifikasi (atau ke email pemilik akun saat uji). |
 | **Webhook Midtrans tidak masuk** | Notification URL harus `https://SITE_ADDRESS/v1/webhooks/midtrans` (bukan localhost). Cek `make prod-logs S=api`, cari `webhook`. Pembayaran tetap tercatat lewat pengecekan status oleh worker, paling lambat sekitar satu menit. |
 | **Poster/logo hilang setelah deploy** | Unggahan ada di volume `racego-prod_uploads`. Jangan pernah menjalankan `docker compose … down -v` (`-v` menghapus volume). Pulihkan dari backup dengan `make restore`. |
-| **`make prod-up` gagal: "isi SITE_ADDRESS" / "jalankan scripts/gen-secrets.sh"** | `.env.prod` belum lengkap: jalankan `scripts/gen-secrets.sh` dan isi `SITE_ADDRESS`. |
+| **`make prod-up` gagal: "isi SITE_ADDRESS" / "jalankan scripts/gen-secrets.sh"** | `.env.prod` belum lengkap (mis. `QUEUE_SECRET` baru ada sejak antrian virtual): jalankan `scripts/gen-secrets.sh` dan isi `SITE_ADDRESS`. |
 | **Situs lokal lain di laptop jadi dipaksa HTTPS** | HSTS tidak dikirim untuk `localhost`. Kalau pernah membuka domain lain lewat HTTPS lalu ingin HTTP, hapus HSTS-nya di `chrome://net-internals/#hsts`. |

@@ -39,6 +39,8 @@ type EventInput struct {
 	RacepackInfo string `json:"racepack_info"`
 	ThemeColor   string `json:"theme_color"` // kosong = pakai warna penyelenggara
 	CoverURL     string `json:"cover_url"`   // kosong = sampul otomatis
+	// Antrian virtual. null/tidak dikirim saat PATCH = tidak diubah.
+	WaitingRoom *bool `json:"waiting_room,omitempty"`
 }
 
 func (in *EventInput) trim() {

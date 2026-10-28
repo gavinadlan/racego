@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/gavinadlan/racego/backend/internal/ratelimit"
 )
 
 const (
@@ -37,11 +39,7 @@ func (e ErrOTPInvalid) Error() string {
 }
 
 // ErrRateLimited: terlalu sering meminta kode; boleh lagi setelah RetryAfter.
-type ErrRateLimited struct{ RetryAfter time.Duration }
-
-func (e ErrRateLimited) Error() string {
-	return fmt.Sprintf("terlalu sering, coba lagi dalam %s", e.RetryAfter)
-}
+type ErrRateLimited = ratelimit.Exceeded
 
 // NormalizeEmail: huruf kecil tanpa spasi; false bila bukan alamat email polos yang valid.
 func NormalizeEmail(s string) (string, bool) {
@@ -137,20 +135,6 @@ func (s *OTPStore) Verify(ctx context.Context, email, code string) error {
 	return ErrOTPInvalid{Remaining: OTPMaxAttempts - n}
 }
 
-// limit: INCR + EXPIRE; lebih dari allowed dalam satu jendela waktu = ErrRateLimited.
 func (s *OTPStore) limit(ctx context.Context, key string, allowed int64, window time.Duration) error {
-	var incr *redis.IntCmd
-	var ttl *redis.DurationCmd
-	if _, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
-		incr = p.Incr(ctx, key)
-		p.ExpireNX(ctx, key, window)
-		ttl = p.TTL(ctx, key)
-		return nil
-	}); err != nil {
-		return err
-	}
-	if incr.Val() <= allowed {
-		return nil
-	}
-	return ErrRateLimited{RetryAfter: max(ttl.Val(), time.Second)}
+	return ratelimit.Allow(ctx, s.rdb, key, allowed, window)
 }

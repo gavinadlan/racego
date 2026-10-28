@@ -13,6 +13,7 @@ import { Monogram } from "./home";
 import { useSession } from "./session";
 import { btnDark, btnPrimary, ErrorBox, Field, inputCls, Loading, LoginHint } from "./ui";
 import { UploadedImage } from "./ui-client";
+import { queueVisible, storedPass, WaitingRoom } from "./waiting-room";
 
 export function EventDetailView() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -77,7 +78,7 @@ export function EventDetailView() {
                 }}
               />
             ) : (
-              <CategoryPicker event={event} onReserved={(res, category) => setReservation({ res, category })} />
+              <CategoryPicker event={event} onRefresh={reload} onReserved={(res, category) => setReservation({ res, category })} />
             )}
           </section>
 
@@ -130,7 +131,12 @@ function StatusCard({ event }: { event: EventDetail }) {
           <div className="mt-2">
             <BigCountdown target={new Date(event.sale_open_at).getTime()} />
           </div>
-          <p className="mt-4 text-sm text-white/70">Dibuka {formatDateTime(event.sale_open_at)}. Masuk lebih awal, kuota biasanya habis di menit pertama.</p>
+          <p className="mt-4 text-sm text-white/70">
+            Dibuka {formatDateTime(event.sale_open_at)}.{" "}
+            {event.waiting_room && event.lobby_opens_at
+              ? `Event ini memakai antrian; lobi dibuka ${formatDateTime(event.lobby_opens_at)} dan urutan lobi diundi saat jam buka.`
+              : "Masuk lebih awal, kuota biasanya habis di menit pertama."}
+          </p>
         </>
       )}
       {event.status === "open" && (
@@ -153,13 +159,30 @@ function StatusCard({ event }: { event: EventDetail }) {
   );
 }
 
-function CategoryPicker({ event, onReserved }: { event: EventDetail; onReserved: (r: Reservation, c: Category) => void }) {
+function CategoryPicker({
+  event,
+  onReserved,
+  onRefresh,
+}: {
+  event: EventDetail;
+  onReserved: (r: Reservation, c: Category) => void;
+  onRefresh: () => void;
+}) {
   const router = useRouter();
   const { ready, userId } = useSession();
   const [qty, setQty] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const canBuy = event.status === "open";
+  // Antrian virtual: Daftar hanya aktif bagi yang sudah dipanggil (memegang pass).
+  const queued = queueVisible(event);
+  const [pass, setPass] = useState<string | null>(null);
+  const [queueReset, setQueueReset] = useState(0);
+  const canBuy = queued ? !!pass : event.status === "open";
+
+  function onPass(p: string | null) {
+    if (p && !pass) onRefresh(); // dipanggil: segarkan sisa kuota & status event
+    setPass(p);
+  }
 
   async function reserve(c: Category) {
     // Belum masuk: login dulu, slot belum diamankan.
@@ -170,12 +193,18 @@ function CategoryPicker({ event, onReserved }: { event: EventDetail; onReserved:
     setBusy(c.id);
     setError(null);
     try {
+      const p = event.waiting_room ? (storedPass(event.id) ?? pass) : null;
       const res = await apiFetch<Reservation>(`/v1/categories/${c.id}/reservations`, {
         method: "POST",
         body: { qty: qty[c.id] ?? 1 },
+        headers: p ? { "X-Queue-Pass": p } : undefined,
       });
       onReserved(res, c);
     } catch (e) {
+      if (e instanceof ApiError && (e.code === "queue_required" || e.code === "queue_pass_expired")) {
+        setPass(null);
+        setQueueReset((k) => k + 1); // kartu antrian memuat ulang status & menawarkan bergabung lagi
+      }
       setError(e instanceof ApiError ? e.message : "Gagal mengamankan slot");
     } finally {
       setBusy(null);
@@ -185,7 +214,12 @@ function CategoryPicker({ event, onReserved }: { event: EventDetail; onReserved:
   return (
     <>
       <h2 className="font-display text-4xl leading-none font-extrabold">{canBuy ? "Pilih kategori" : "Kategori"}</h2>
-      {canBuy && !userId && (
+      {queued && (
+        <div className="mt-6">
+          <WaitingRoom event={event} onPass={onPass} resetKey={queueReset} />
+        </div>
+      )}
+      {canBuy && !queued && !userId && (
         <div className="mt-4">
           <LoginHint />
         </div>

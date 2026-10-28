@@ -37,10 +37,10 @@ Aturan kode: 6 digit, berlaku 10 menit, sekali pakai, maks 5 percobaan salah. Ki
 
 | Method | Path | Keterangan |
 | --- | --- | --- |
-| GET | `/healthz` | Cek DB & Redis; `midtrans_mock` menunjukkan mode pembayaran |
+| GET | `/healthz` | Cek DB & Redis; `env` (`development`/`production`) dan `midtrans_mock` (mode pembayaran) |
 | GET | `/v1/events` | Daftar event. Query opsional: `scope` (`upcoming` default, `past`, `all`), `city`, `distance` (mis. `21K`), `month` (`YYYY-MM`), `from`/`to` (`YYYY-MM-DD`), `org` (slug), `q`, `limit` |
 | GET | `/v1/events/filters` | Pilihan kota & jarak untuk kolom pencarian |
-| GET | `/v1/events/{eventID}` | Detail + kategori + sisa stok (`remaining: null` = stok belum dimuat) + profil singkat penyelenggara |
+| GET | `/v1/events/{eventID}` | Detail + kategori + sisa stok (`remaining: null` = stok belum dimuat) + profil singkat penyelenggara + `waiting_room` (antrian virtual) dan, bila aktif, `lobby_opens_at` |
 | GET | `/v1/organizers` | Direktori penyelenggara terverifikasi + jumlah race |
 | GET | `/v1/organizers/{slug}` | Profil penyelenggara + race mendatang + arsip |
 | GET | `/v1/qr/public-key` | Kunci publik Ed25519 untuk verifikasi QR offline |
@@ -53,12 +53,25 @@ Aturan kode: 6 digit, berlaku 10 menit, sekali pakai, maks 5 percobaan salah. Ki
 | --- | --- | --- | --- |
 | GET | `/v1/me` | | `id`, `name`, `email`, `phone`, `orgs` (mitra & peran) |
 | PATCH | `/v1/me` | `{"name","phone"}` | 200 profil terbaru · 422 `invalid_name` (2–100 karakter) / `invalid_phone` (format Indonesia `08…`/`628…`/`+628…`, disimpan sebagai `08…`; kosong = dihapus) |
-| POST | `/v1/categories/{categoryID}/reservations` | `{"qty": 2}` | 201 `reservation_id`, `expires_at`, `remaining` · 409 `sold_out` / `limit_exceeded` / `sale_not_open` |
+| POST | `/v1/categories/{categoryID}/reservations` | `{"qty": 2}`; event ber-antrian: header `X-Queue-Pass` | 201 `reservation_id`, `expires_at`, `remaining` (pass antrian dilepas) · 409 `sold_out` / `limit_exceeded` / `sale_not_open` · 403 `queue_required` (tanpa pass, pass tidak sah/milik orang lain/sudah dipakai/dicabut) / `queue_pass_expired` |
 | POST | `/v1/orders` | header `Idempotency-Key`; `{"category_id","reservation_id","participants":[…]}` | 201 `order_id`, `snap_token`, `redirect_url`, `mock` · 410 `reservation_expired` · 409 `reservation_used` · 422 validasi peserta |
-| GET | `/v1/orders/{orderID}` | | status order (untuk polling); bila belum lunas & bukan mock, sekalian cek status ke Midtrans |
-| GET | `/v1/me/tickets` | | tiket + `qr_token` + BIB |
+| GET | `/v1/orders/{orderID}` | | status order (untuk polling) + `qty` + `tickets_issued` (tiket yang sudah terbit; worker menerbitkannya beberapa detik setelah lunas); bila belum lunas & bukan mock, sekalian cek status ke Midtrans |
+| GET | `/v1/me/tickets` | | tiket + `qr_token` + BIB + `order_id` |
+| POST | `/v1/events/{eventID}/queue` | | Masuk antrian virtual. 201 baru, 200 sudah di antrian (posisi tidak berubah); body = status antrian · 409 `queue_not_open` (sebelum lobi / penjualan sudah ditutup) · 404 `event_not_found` (tidak ada, belum terbit, atau tanpa antrian) · 429 `too_many_requests` (20/menit per akun, 300/menit per IP) |
+| GET | `/v1/events/{eventID}/queue/me` | | Status antrian + tanda hidup (panggil sesuai `poll_after_ms`). 429 `too_many_requests` + `retry_after` bila < 1 detik sejak panggilan sebelumnya |
+| DELETE | `/v1/events/{eventID}/queue/me` | | 204; keluar antrian dan pass dicabut |
 | POST | `/v1/orgs` | `{"name","slug"?,"city","description","instagram"?,"website"?}` | 201 `slug`, `name`, `kyc_status` (pembuat jadi owner) · 422 `validation` (nama 3–80, slug 3–40 `a-z0-9-` & bukan nama route frontend, instagram tanpa `@`, website `https://`) · 429 `too_many_orgs` (maks 3 per akun) |
 | GET | `/v1/orgs/slug-check?slug=` | | `{"available": bool, "message"?}` |
+
+Status antrian:
+
+```json
+{ "state": "waiting", "position": 128, "ahead": 127, "queue_size": 5400, "eta_seconds": 7,
+  "poll_after_ms": 3612, "server_time": "2026-11-01T03:00:12.120Z",
+  "lobby_opens_at": "2026-11-01T02:45:00Z", "sale_open_at": "2026-11-01T03:00:00Z" }
+```
+
+`state`: `lobby` (sebelum jam buka; `position` null karena urutan baru diundi saat buka), `waiting`, `admitted` (+ `pass`, `pass_expires_at`), `sold_out`, `closed`, `not_in_queue`. `eta_seconds` null bila laju panggil belum terukur. `poll_after_ms` dihitung server dan sudah berjitter; 0 = tidak perlu polling lagi. Kirim `pass` sebagai header `X-Queue-Pass` ke endpoint reservasi.
 
 Objek peserta:
 
@@ -74,12 +87,13 @@ Objek peserta:
 
 | Method | Path | Peran | Keterangan |
 | --- | --- | --- | --- |
-| GET | `/v1/org/{org}/events` | semua anggota | event mitra (termasuk draft) + status, terjual, diambil, penjualan |
+| GET | `/v1/org/{org}/events` | semua anggota | event mitra (termasuk draft) + status, terjual, diambil, penjualan, `waiting_room` |
 | GET | `/v1/org/{org}/profile` | semua anggota | profil org + `kyc_status` + `role` user |
 | PATCH | `/v1/org/{org}/profile` | owner, admin | `{"name","city","description","instagram","website","theme_color","logo_url"}`; slug tidak bisa diubah |
 | POST | `/v1/org/{org}/uploads?kind=cover\|logo` | owner, admin | multipart field `file` → 201 `{"url":"/uploads/<hash>.jpg"}` · 413 `file_too_large` · 422 `invalid_image` / `image_too_big` |
 | POST | `/v1/org/{org}/events` | owner, admin | event + `categories` (opsional) → 201 draft lengkap · 422 `validation` / `too_many_drafts` |
-| GET | `/v1/org/{org}/events/{eventID}` | semua anggota | detail untuk form edit: kategori + `sold`, `pending`, `locked`, `has_orders`, `remaining` (Redis) |
+| GET | `/v1/org/{org}/events/{eventID}` | semua anggota | detail untuk form edit: `waiting_room` + kategori + `sold`, `pending`, `locked`, `has_orders`, `remaining` (Redis) |
+| GET | `/v1/org/{org}/events/{eventID}/queue` | owner, admin, finance | ringkasan antrian langsung: `phase` (`before_lobby`/`lobby`/`selling`/`closed`), `queue_size`, `active` (pass aktif), `admitted_total`, `final`, `max_active`, `admit_per_sec` |
 | PATCH | `/v1/org/{org}/events/{eventID}` | owner, admin | semua kolom form event (lihat di bawah) |
 | POST | `/v1/org/{org}/events/{eventID}/publish` | owner, admin | 200 · 409 `org_not_verified` / `invalid_status` · 422 `validation` (termasuk `categories` bila kosong) |
 | POST | `/v1/org/{org}/events/{eventID}/unpublish` | owner, admin | kembali ke draft; 409 `has_orders` bila sudah ada order |
@@ -101,11 +115,11 @@ Form event (`POST`/`PATCH`):
 { "name": "Bogor Botanic Run", "tagline": "…", "description": "…", "venue": "Kebun Raya", "city": "Bogor",
   "race_date": "2027-01-10", "start_time": "05:30",
   "sale_open_at": "2026-11-01T10:00:00+07:00", "sale_close_at": "2027-01-07T23:59:00+07:00",
-  "racepack_info": "…", "theme_color": "#1F8A5B", "cover_url": "/uploads/<hash>.jpg",
+  "racepack_info": "…", "theme_color": "#1F8A5B", "cover_url": "/uploads/<hash>.jpg", "waiting_room": true,
   "categories": [{ "code": "10K", "name": "10K", "distance_km": 10, "price": 200000, "quota": 500, "max_per_user": 2, "bib_prefix": "10" }] }
 ```
 
-Aturan: nama 3–100; `race_date` setelah hari ini (WIB) saat dibuat/diubah/terbit; `sale_open_at < sale_close_at ≤` akhir hari race WIB; `start_time` `HH:MM`; tagline ≤ 120, deskripsi ≤ 5.000, info race pack ≤ 2.000; kategori: kode 2–8 `A-Z0-9` unik, jarak 0–250 km, harga 0–50 jt, kuota 1–100.000, maks/akun 1–10, prefix BIB 1–3 digit unik per event.
+Aturan: nama 3–100; `race_date` setelah hari ini (WIB) saat dibuat/diubah/terbit; `sale_open_at < sale_close_at ≤` akhir hari race WIB; `start_time` `HH:MM`; tagline ≤ 120, deskripsi ≤ 5.000, info race pack ≤ 2.000; kategori: kode 2–8 `A-Z0-9` unik, jarak 0–250 km, harga 0–50 jt, kuota 1–100.000, maks/akun 1–10, prefix BIB 1–3 digit unik per event. `waiting_room` (bool) tidak dikirim saat `PATCH` = tidak diubah; mengubahnya setelah penjualan dibuka (event bukan draft) → 422 dengan `fields.waiting_room`.
 
 ## Development saja
 
@@ -127,4 +141,11 @@ C=cccccccc-0000-0000-0000-000000000021   # 21K Jakarta
 
 curl -s -XPOST localhost:8080/v1/categories/$C/reservations \
   -H "X-User-ID: $U" -H 'Content-Type: application/json' -d '{"qty":1}'
+
+# Event ber-antrian: masuk antrian, polling sampai "admitted", lalu reservasi dengan pass
+E=<event id>
+curl -s -XPOST localhost:8080/v1/events/$E/queue -H "X-User-ID: $U"
+PASS=$(curl -s localhost:8080/v1/events/$E/queue/me -H "X-User-ID: $U" | jq -r .pass)
+curl -s -XPOST localhost:8080/v1/categories/<kategori event itu>/reservations \
+  -H "X-User-ID: $U" -H "X-Queue-Pass: $PASS" -H 'Content-Type: application/json' -d '{"qty":1}'
 ```

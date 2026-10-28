@@ -47,7 +47,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid_email", "Format email tidak valid")
 		return
 	}
-	if err := h.otps.LimitIP(r.Context(), clientIP(r)); err != nil {
+	if err := h.otps.LimitIP(r.Context(), ClientIP(r)); err != nil {
 		h.otpError(w, r, err)
 		return
 	}
@@ -101,7 +101,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	token, expires, err := h.sessions.Create(ctx, userID, r.UserAgent(), clientIP(r))
+	token, expires, err := h.sessions.Create(ctx, userID, r.UserAgent(), ClientIP(r))
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -275,7 +275,8 @@ func nameFromEmail(email string) string {
 	return strings.ToUpper(string(r)) + local[size:]
 }
 
-func clientIP(r *http.Request) string {
+// ClientIP: alamat klien (sudah diganti middleware realIP bila ada proxy tepercaya).
+func ClientIP(r *http.Request) string {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}

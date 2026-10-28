@@ -32,6 +32,8 @@ flowchart TB
 | Modul | Tanggung jawab |
 | --- | --- |
 | `checkout` | Kuota di Redis (skrip Lua `reserve` / `release` / `confirm`), reservasi, pembuatan order |
+| `queue` | Antrian virtual per event: lobi, urutan acak, pemanggilan (Lua `join` / `status` / `admit` / `release`), pass HMAC yang diperiksa `checkout` lewat antarmuka `QueueGate` |
+| `ratelimit` | Pembatas INCR + EXPIRE di Redis, dipakai OTP dan antrian |
 | `payment` | Snap client (HTTP & mock), verifikasi & pemrosesan webhook Midtrans |
 | `ticket` | Tanda tangan QR Ed25519, penerbitan tiket + BIB, scan race pack |
 | `ledger` | Jurnal double-entry, fee platform, estimasi biaya PG |
@@ -39,7 +41,7 @@ flowchart TB
 | `event` | Katalog publik (hanya event terbit dari mitra terverifikasi), ringkasan penjualan mitra |
 | `partner` | Portal mitra: daftar penyelenggara, profil, CRUD event & kategori, terbitkan/tutup, anggota tim, audit |
 | `upload` | Validasi & simpan gambar (poster, logo) di balik antarmuka `Storage` (sekarang disk lokal) |
-| `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order) |
+| `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order), dan pemanggilan antrian tiap detik di goroutine terpisah |
 | `auth` | Login email + OTP, sesi cookie, profil `/me`, middleware identitas & CSRF |
 | `notify` | Email tiket & kode masuk (SMTP, batas waktu 10 detik) |
 
@@ -47,10 +49,14 @@ Aturan dependensi: modul boleh saling impor ke arah "bawah" saja (`checkout` →
 
 ## Alur data utama
 
-1. **Reservasi** — API membaca info kategori (cache 3 detik), lalu satu skrip Lua di Redis mengurangi stok dan membuat hold ber-timer.
+1. **Reservasi** — API membaca info kategori (cache 3 detik), memeriksa pass antrian bila event memakai antrian, lalu satu skrip Lua di Redis mengurangi stok dan membuat hold ber-timer.
 2. **Order** — reservasi + data peserta disimpan sebagai order `pending` di Postgres (idempotent lewat header `Idempotency-Key`), lalu token Snap dibuat.
 3. **Webhook** — Midtrans memanggil `/v1/webhooks/midtrans`. Signature diverifikasi, event dicatat unik per `(order, status)`, status order hanya bergerak maju, dan pesan `order.paid` ditulis ke tabel `outbox` **dalam transaksi yang sama**.
 4. **Worker** — mengambil pesan outbox (`FOR UPDATE SKIP LOCKED`), mengunci slot di Redis, menerbitkan tiket, menulis jurnal ledger, lalu mengantrekan email. Setiap langkah idempotent; gagal → retry dengan backoff.
+
+## Antrian virtual
+
+Opsional per event (`events.waiting_room`). Pembeli login masuk lobi `QUEUE_LOBBY_MINUTES` sebelum penjualan; pada jam buka urutan lobi = skor acak yang diberikan saat bergabung. Worker memanggil peserta tiap detik (laju & batas pass aktif) dan membuang yang berhenti polling. Yang dipanggil mendapat pass HMAC; `checkout.Reserve` mewajibkan header `X-Queue-Pass` untuk event itu dan melepas pass setelah reservasi berhasil. Semua status antrian ada di Redis (hash tag `{ev:<id>}`), tanpa query Postgres per polling (info event di-cache 3 detik di API, daftar event aktif dibaca worker tiap 10 detik). Detail, batas, dan hasil uji: [03-war-tiket](03-war-tiket.md#antrian-virtual-waiting-room).
 
 ## Login & sesi
 

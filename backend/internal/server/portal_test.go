@@ -26,6 +26,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
+	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 )
 
@@ -37,6 +38,7 @@ type portalEnv struct {
 	db  *pgxpool.Pool
 	inv *checkout.Inventory
 	mr  *miniredis.Miniredis
+	q   *queue.Queue
 	h   http.Handler
 	tag string
 }
@@ -60,10 +62,16 @@ func newPortalEnv(t *testing.T, autoVerify bool) *portalEnv {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Env: "development", FrontendURL: "http://localhost:3000", ReservationTTL: 15 * time.Minute,
-		AutoVerifyOrgs: autoVerify, UploadDir: t.TempDir()}
-	e := &portalEnv{t: t, db: db, inv: inv, mr: mr, tag: strings.ReplaceAll(uuid.NewString()[:8], "-", ""),
+		AutoVerifyOrgs: autoVerify, UploadDir: t.TempDir(),
+		Queue: config.QueueConfig{LobbyMinutes: 15, AdmitPerSec: 20, MaxActive: 300, PassTTL: 10 * time.Minute, HeartbeatTTL: 45 * time.Second}}
+	passSigner, err := queue.NewPassSigner("", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := queue.New(rdb, inv, passSigner, cfg.Queue)
+	e := &portalEnv{t: t, db: db, inv: inv, mr: mr, q: q, tag: strings.ReplaceAll(uuid.NewString()[:8], "-", ""),
 		h: NewRouter(Deps{Cfg: cfg, DB: db, Redis: rdb, Inv: inv, Snap: payment.NewMockSnap(cfg.FrontendURL), Signer: signer,
-			Mailer: notify.NewMailer("localhost:1", "", "", "x@x")})}
+			Mailer: notify.NewMailer("localhost:1", "", "", "x@x"), Queue: q})}
 	t.Cleanup(func() {
 		pattern := "%" + e.tag + "@uji.test"
 		orgs := `SELECT id FROM organizations WHERE created_by IN (SELECT id FROM users WHERE email LIKE $1)`
@@ -111,6 +119,11 @@ func (r resp) field(k string) string {
 
 func (e *portalEnv) do(user uuid.UUID, method, path string, body any) resp {
 	e.t.Helper()
+	return e.doH(user, method, path, body, nil)
+}
+
+func (e *portalEnv) doH(user uuid.UUID, method, path string, body any, headers map[string]string) resp {
+	e.t.Helper()
 	var rd *bytes.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -122,6 +135,9 @@ func (e *portalEnv) do(user uuid.UUID, method, path string, body any) resp {
 	req.Header.Set("Content-Type", "application/json")
 	if user != uuid.Nil {
 		req.Header.Set("X-User-ID", user.String())
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)

@@ -58,6 +58,7 @@ function EventsTab({ role }: { role: Role }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold">{e.name}</p>
                   <EventStatusBadge status={e.status} />
+                  {e.waiting_room && <span className="inline-block rounded-full bg-asphalt px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap text-white">Antrian aktif</span>}
                 </div>
                 <p className="text-xs text-muted">{formatDate(e.race_date)}</p>
                 <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm tabular-nums">

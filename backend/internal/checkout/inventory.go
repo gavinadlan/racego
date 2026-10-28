@@ -35,6 +35,10 @@ var (
 	ErrLimitExceeded = errors.New("melebihi batas slot per akun")
 	ErrNotOpen       = errors.New("penjualan belum dibuka")
 	ErrBelowUsed     = errors.New("kuota baru lebih kecil dari slot yang terjual + sedang ditahan")
+
+	// Antrian virtual (lihat QueueGate).
+	ErrQueueRequired    = errors.New("event ini memakai antrian; pass tidak ada atau tidak sah")
+	ErrQueuePassExpired = errors.New("pass antrian kedaluwarsa")
 )
 
 // ConfirmResult adalah hasil mengunci slot setelah pembayaran lunas.
@@ -231,6 +235,33 @@ func (inv *Inventory) ExpiredHolds(ctx context.Context, categoryID string, now t
 	return inv.rdb.ZRangeByScore(ctx, keysFor(categoryID).holds(), &redis.ZRangeBy{
 		Min: "-inf", Max: strconv.FormatInt(now.Unix(), 10), Count: limit,
 	}).Result()
+}
+
+// Totals menjumlah stok tersisa dan hold aktif (termasuk yang menunggu dikembalikan) beberapa
+// kategori sekaligus. loaded=false bila ada kategori yang stoknya belum dimuat ke Redis.
+func (inv *Inventory) Totals(ctx context.Context, categoryIDs []string) (stock, holds int, loaded bool, err error) {
+	pipe := inv.rdb.Pipeline()
+	stocks := make([]*redis.StringCmd, len(categoryIDs))
+	counts := make([]*redis.IntCmd, len(categoryIDs))
+	for i, id := range categoryIDs {
+		stocks[i] = pipe.Get(ctx, keysFor(id).stock())
+		counts[i] = pipe.ZCard(ctx, keysFor(id).holds())
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return 0, 0, false, err
+	}
+	loaded = true
+	for i := range categoryIDs {
+		n, err := stocks[i].Int()
+		if errors.Is(err, redis.Nil) {
+			loaded = false
+		} else if err != nil {
+			return 0, 0, false, err
+		}
+		stock += n
+		holds += int(counts[i].Val())
+	}
+	return stock, holds, loaded, nil
 }
 
 // ActiveCategories mengembalikan semua kategori yang stoknya dikelola di Redis.

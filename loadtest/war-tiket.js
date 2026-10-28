@@ -1,4 +1,6 @@
-// Uji beban "war tiket" untuk jalur paling panas: reservasi slot.
+// Uji beban "war tiket" untuk jalur paling panas: reservasi slot, untuk event TANPA antrian virtual.
+// Event ber-antrian butuh pass dari antrian (header X-Queue-Pass); ujinya pakai `make queue-load`
+// (scripts/queue-sim.mjs), lihat docs/03-war-tiket.md.
 //
 //   make db-reset            # kuota kembali penuh
 //   make loadtest            # atau: k6 run loadtest/war-tiket.js

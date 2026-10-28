@@ -1,30 +1,58 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
+import { useEffect, useState } from "react";
 import type { MyTicket } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 import { PinHoles } from "./bib";
+import { useNow } from "./clock";
 import { useSession } from "./session";
 import { ErrorBox, Loading, LoginHint, PageTitle, StatusBadge } from "./ui";
 
+const WAIT_MS = 60_000;
+
 export function MyTickets() {
   const { ready, userId } = useSession();
-  const { data, error, loading } = useApi<{ tickets: MyTicket[] }>(userId ? "/v1/me/tickets" : null, [userId]);
+  const { data, error, loading, reload } = useApi<{ tickets: MyTicket[] }>(userId ? "/v1/me/tickets" : null, [userId]);
+  // Datang dari order yang baru lunas (?order=…): tiket terbit beberapa detik kemudian oleh worker,
+  // jadi muat ulang tiap 2 detik (maksimal 60 detik) sampai tiket order itu muncul.
+  const order = useSearchParams().get("order");
+  const now = useNow();
+  const [since] = useState(() => Date.now());
+  const waiting = !!order && !!data && !data.tickets.some((t) => t.order_id === order);
+  const gaveUp = waiting && now !== null && now - since > WAIT_MS;
+  useEffect(() => {
+    if (!waiting || gaveUp) return;
+    const t = setInterval(reload, 2000);
+    return () => clearInterval(t);
+  }, [waiting, gaveUp, reload]);
 
   return (
     <>
       <PageTitle title="Tiket saya">
         <p className="mt-3 text-muted">Tunjukkan QR beserta KTP saat mengambil race pack.</p>
       </PageTitle>
-      {!ready || loading ? (
+      {waiting && (
+        <p className="mb-6 rounded-md border border-dashed border-line bg-card px-4 py-3 text-sm" aria-live="polite">
+          {gaveUp ? (
+            <>
+              <b>Tiket belum muncul?</b> Muat ulang beberapa saat lagi; email tiket tetap dikirim.
+            </>
+          ) : (
+            <span className="animate-pulse">Menunggu tiket terbit…</span>
+          )}
+        </p>
+      )}
+      {!ready || (loading && !data) ? (
         <Loading />
       ) : !userId ? (
         <LoginHint />
       ) : error ? (
         <ErrorBox message={error} />
       ) : !data?.tickets.length ? (
-        <p className="text-muted">Belum ada tiket. Tiket terbit otomatis beberapa detik setelah pembayaran lunas.</p>
+        !waiting && <p className="text-muted">Belum ada tiket. Tiket terbit otomatis beberapa detik setelah pembayaran lunas.</p>
       ) : (
         <ul className="grid gap-8 md:grid-cols-2">
           {data.tickets.map((t) => (

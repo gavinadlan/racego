@@ -91,6 +91,7 @@ type MyTicket struct {
 	CategoryCode string    `json:"category_code"`
 	CategoryName string    `json:"category_name"`
 	OrgName      string    `json:"org_name"`
+	OrderID      uuid.UUID `json:"order_id"`
 }
 
 // MyTickets: GET /v1/me/tickets — semua tiket dari order milik user yang login.
@@ -98,7 +99,7 @@ func (h *Handler) MyTickets(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserID(r.Context())
 	rows, err := h.db.Query(r.Context(), `
 		SELECT t.id, t.status, t.bib_number, t.qr_token, p.full_name, p.jersey_size,
-		       e.id, e.name, e.venue, e.race_date, c.code, c.name, o.name
+		       e.id, e.name, e.venue, e.race_date, c.code, c.name, o.name, t.order_id
 		FROM tickets t
 		JOIN participants p ON p.id = t.participant_id
 		JOIN orders ord ON ord.id = t.order_id
@@ -114,7 +115,7 @@ func (h *Handler) MyTickets(w http.ResponseWriter, r *http.Request) {
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (MyTicket, error) {
 		var t MyTicket
 		err := row.Scan(&t.ID, &t.Status, &t.BibNumber, &t.QRToken, &t.Participant, &t.JerseySize,
-			&t.EventID, &t.EventName, &t.EventVenue, &t.RaceDate, &t.CategoryCode, &t.CategoryName, &t.OrgName)
+			&t.EventID, &t.EventName, &t.EventVenue, &t.RaceDate, &t.CategoryCode, &t.CategoryName, &t.OrgName, &t.OrderID)
 		return t, err
 	})
 	if err != nil {

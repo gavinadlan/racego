@@ -16,6 +16,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
+	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/server"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 )
@@ -48,6 +49,12 @@ func run() error {
 		return err
 	}
 
+	passSigner, err := queue.NewPassSigner(cfg.Queue.Secret, cfg.IsDev())
+	if err != nil {
+		return err
+	}
+	inv := checkout.NewInventory(rdb)
+
 	var snap payment.SnapClient
 	if cfg.MidtransMock() {
 		slog.Warn("MIDTRANS_SERVER_KEY kosong → mode MOCK: pembayaran disimulasikan")
@@ -59,7 +66,8 @@ func run() error {
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: server.NewRouter(server.Deps{
-			Cfg: cfg, DB: db, Redis: rdb, Inv: checkout.NewInventory(rdb), Snap: snap, Signer: signer,
+			Cfg: cfg, DB: db, Redis: rdb, Inv: inv, Snap: snap, Signer: signer,
+			Queue:  queue.New(rdb, inv, passSigner, cfg.Queue),
 			Mailer: notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

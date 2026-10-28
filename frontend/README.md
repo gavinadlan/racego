@@ -37,7 +37,7 @@ Diambil dari race day, bukan template:
 - **Motif BIB**: kartu event dan tiket berbentuk nomor dada — pita warna penyelenggara, tanggal/nomor besar, garis sobek, lubang peniti di empat sudut (`components/bib.tsx`).
 - **Warna** (`app/globals.css`): putih kertas BIB `#F7F8F5`, aspal `#23272E`, oranye rompi marshal `#FF5B23` (aksen & tombol utama), hijau `#1F8A5B` untuk status dibuka. Setiap penyelenggara punya `theme_color`; warna teks di atasnya dipilih otomatis (`textOn`).
 - **Huruf**: Big Shoulders Display (angka & judul, condensed seperti nomor dada) + Instrument Sans (teks), dipasang dari npm (`@fontsource-variable/*`) sehingga tidak bergantung pada Google Fonts saat build.
-- Satu momen gerak saja: hitung mundur flag-off; tidak ada animasi masuk per section.
+- Gerak hanya untuk informasi waktu: hitung mundur (flag-off, lobi antrian, masa giliran) dan bilah progres antrian; tidak ada animasi masuk per section.
 
 ## Struktur
 
@@ -57,4 +57,6 @@ src/
 - Baca `AGENTS.md` sebelum memakai AI coding agent — API Next 16 berbeda dari versi lama.
 - **Gambar unggahan** (poster, logo) dirender lewat `UploadedImage` (`components/ui-client.tsx`) dengan `API_URL + url`. Ukuran kotak ditentukan pemanggil, jadi gambar yang gagal dimuat tidak menggeser tata letak (fallback inisial/warna tema).
 - **Peran mitra** dibaca dari `me.orgs` (`roleIn`, `canEdit` di `lib/api.ts`); tombol yang butuh peran owner/admin disembunyikan untuk staf, server tetap memeriksa ulang.
+- **Antrian virtual** (`components/waiting-room.tsx`): kartu di halaman event ber-antrian. Polling mengikuti `poll_after_ms` dari server (tetap jalan saat tab tersembunyi, karena polling = tanda hidup), hitung mundur dikoreksi `server_time`, pass disimpan per event di `sessionStorage` dan dikirim sebagai `X-Queue-Pass` saat Daftar. Pembaca layar hanya diberi tahu saat status berubah atau posisi bergeser ≥ 10.
+- **Tiket setelah bayar**: halaman order polling sampai `tickets_issued == qty`; `/tickets?order=<id>` polling `me/tickets` tiap 2 detik (maks 60 detik) sampai tiket order itu muncul.
 - **Uji browser**: Next 16 menyimpan halaman sebelumnya tersembunyi di DOM (`<Activity>`), jadi locator Playwright perlu `.filter({ visible: true })` setelah navigasi di sisi klien.

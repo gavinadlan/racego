@@ -18,6 +18,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/ledger"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
+	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 )
 
@@ -35,6 +36,13 @@ type Worker struct {
 	mailer      *notify.Mailer
 	frontendURL string
 	reconciler  *payment.Reconciler // nil di mode mock
+	queue       *queue.Runner
+}
+
+// WithQueue mengaktifkan pemanggilan antrian virtual tiap detik.
+func (w *Worker) WithQueue(r *queue.Runner) *Worker {
+	w.queue = r
+	return w
 }
 
 // WithReconciler mengaktifkan pengecekan berkala status order ke Midtrans.
@@ -58,6 +66,8 @@ func (w *Worker) Run(ctx context.Context) {
 	defer sync.Stop()
 	defer reconcile.Stop()
 
+	// Antrian di goroutine sendiri: email/outbox yang lambat tidak boleh menahan pemanggilan.
+	go w.runQueues(ctx)
 	w.syncStock(ctx)
 	w.reconcilePayments(ctx)
 	for {
@@ -250,6 +260,30 @@ func (w *Worker) onTicketEmail(ctx context.Context, tx pgx.Tx, orderID uuid.UUID
 }
 
 // ===== Job berkala =====
+
+// runQueues memanggil peserta antrian virtual tiap detik. Gagal (mis. Redis sesaat putus) hanya
+// dicatat; putaran berikutnya mencoba lagi.
+func (w *Worker) runQueues(ctx context.Context) {
+	if w.queue == nil {
+		return
+	}
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			n, errs := w.queue.Tick(ctx, now)
+			for _, err := range errs {
+				slog.ErrorContext(ctx, "antrian", "err", err)
+			}
+			if n > 0 {
+				slog.DebugContext(ctx, "antrian: dipanggil", "jumlah", n)
+			}
+		}
+	}
+}
 
 func (w *Worker) syncStock(ctx context.Context) {
 	if n, err := checkout.SyncOpenEvents(ctx, w.db, w.inv); err != nil {

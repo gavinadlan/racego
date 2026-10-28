@@ -20,6 +20,8 @@ type OrgEvent struct {
 	Sold      int       `json:"sold"`
 	Collected int       `json:"collected"`
 	Revenue   int64     `json:"revenue"`
+	// Antrian virtual aktif (lencana di dashboard).
+	WaitingRoom bool `json:"waiting_room"`
 }
 
 // OrgEvents: GET /v1/org/{org}/events — dashboard mitra. Hanya event milik mitra ini (tenant.OrgID).
@@ -30,7 +32,8 @@ func (h *Handler) OrgEvents(w http.ResponseWriter, r *http.Request) {
 		       (SELECT COALESCE(sum(quota), 0) FROM ticket_categories WHERE event_id = e.id),
 		       (SELECT count(*) FROM tickets WHERE event_id = e.id AND status IN ('issued', 'collected')),
 		       (SELECT count(*) FROM tickets WHERE event_id = e.id AND status = 'collected'),
-		       (SELECT COALESCE(sum(total), 0) FROM orders WHERE event_id = e.id AND status = 'paid')
+		       (SELECT COALESCE(sum(total), 0) FROM orders WHERE event_id = e.id AND status = 'paid'),
+		       e.waiting_room
 		FROM events e
 		WHERE e.org_id = $1
 		-- yang akan datang dulu (terdekat di atas), lalu arsip (terbaru di atas)
@@ -43,7 +46,7 @@ func (h *Handler) OrgEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (OrgEvent, error) {
 		var e OrgEvent
-		err := row.Scan(&e.ID, &e.Name, &e.Status, &e.RaceDate, &e.Quota, &e.Sold, &e.Collected, &e.Revenue)
+		err := row.Scan(&e.ID, &e.Name, &e.Status, &e.RaceDate, &e.Quota, &e.Sold, &e.Collected, &e.Revenue, &e.WaitingRoom)
 		return e, err
 	})
 	if err != nil {

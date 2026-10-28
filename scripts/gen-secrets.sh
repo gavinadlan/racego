@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mengisi rahasia kosong di .env.prod: POSTGRES_USER, POSTGRES_PASSWORD, REDIS_PASSWORD, QR_PRIVATE_KEY.
+# Mengisi rahasia kosong di .env.prod: POSTGRES_USER, POSTGRES_PASSWORD, REDIS_PASSWORD, QUEUE_SECRET, QR_PRIVATE_KEY.
 # Nilai yang sudah terisi tidak ditimpa tanpa konfirmasi. Nilai rahasia tidak pernah dicetak.
 #   scripts/gen-secrets.sh            (dari root repo)
 set -euo pipefail
@@ -22,6 +22,8 @@ set_var() {
     K="$1" V="$2" awk 'BEGIN{k=ENVIRON["K"]; v=ENVIRON["V"]} index($0, k"=")==1 {print k"="v; next} {print}' "$ENV_FILE" >"$tmp"
   else
     cat "$ENV_FILE" >"$tmp"
+    # Baris terakhir tanpa newline (disimpan editor) jangan sampai tersambung dengan baris baru.
+    [[ -s $tmp && $(tail -c1 "$tmp") != "" ]] && echo >>"$tmp"
     printf '%s=%s\n' "$1" "$2" >>"$tmp"
   fi
   chmod 600 "$tmp"
@@ -57,6 +59,7 @@ pw() { random_hex 24; }
 fill POSTGRES_USER pg_user "Postgres hanya memakai user/password ini saat volume pgdata pertama dibuat; mengganti nanti membuat api tidak bisa login."
 fill POSTGRES_PASSWORD pw "Postgres hanya memakai user/password ini saat volume pgdata pertama dibuat; mengganti nanti membuat api tidak bisa login."
 fill REDIS_PASSWORD pw
+fill QUEUE_SECRET pw "Mengganti QUEUE_SECRET membatalkan pass antrian yang sedang dipegang pembeli (aman di luar jam war tiket)."
 
 if [[ -n $(current QR_PRIVATE_KEY) ]]; then
   cat <<'WARN'

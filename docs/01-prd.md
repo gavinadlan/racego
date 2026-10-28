@@ -22,12 +22,12 @@ Satu user bisa menjadi pelari sekaligus staf di beberapa mitra (RBAC per tenant)
 ## Ruang lingkup MVP
 
 1. Katalog event & kategori (kuota, harga, batas slot per akun), pencarian kota/bulan/jarak, kalender race, arsip race yang sudah lewat, dan halaman profil tiap penyelenggara.
-2. Reservasi slot atomik dengan timer 15 menit, pembelian untuk beberapa peserta.
+2. Reservasi slot atomik dengan timer 15 menit, pembelian untuk beberapa peserta. **Antrian virtual opsional per event** untuk event yang peminatnya jauh melebihi kuota: lobi sebelum jam buka dengan urutan diundi, pembeli dipanggil bertahap, posisi & perkiraan waktu tampil. Belum mencegah akun ganda/bot (Turnstile & verifikasi identitas di luar cakupan saat ini).
 3. Pembayaran Midtrans Snap (VA, QRIS, e-wallet, kartu) + webhook idempotent.
 4. Tiket QR + nomor BIB terbit otomatis, dikirim via email, tampil di **Tiket saya**.
 5. Dashboard mitra + scanner race pack di web yang sama.
 6. **Portal mitra mandiri**: siapa pun yang login bisa mendaftarkan penyelenggara, membuat event + kategori tiket, mengunggah poster/logo, menerbitkan event (setelah penyelenggara terverifikasi), dan mengundang staf. Tanpa campur tangan tim RaceGo selain verifikasi.
-7. Ledger double-entry dan saldo mitra; pencairan via Midtrans Payouts (fase berikutnya).
+7. Ledger double-entry; saldo mitra & pencairan via Midtrans Payouts menyusul (belum ada di versi ini).
 
 Di luar MVP: aplikasi native, live tracking, hasil race/timing chip, marketplace merchandise.
 

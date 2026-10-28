@@ -7,7 +7,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [x] **Login email OTP**: kode 6 digit, sesi cookie HttpOnly di Postgres, `X-User-ID` hanya di development
 - [ ] **Login Google**
 - [ ] **Profil pelari** (`runner_profiles`): isi sekali, prefill semua peserta
-- [ ] **Virtual waiting room** (Redis ZSET + token HMAC) dan Turnstile di tombol Daftar
+- [x] **Antrian virtual (waiting room)** per event: lobi + urutan acak, pemanggilan bertahap, pass HMAC, ringkasan langsung untuk mitra
+- [ ] **Turnstile / anti-bot** di antrian & tombol Daftar, batas per NIK, deteksi akun ganda (antrian belum mencegahnya)
 - [x] **CRUD event & kategori** dari dashboard mitra (draft → published → closed, kunci harga setelah ada penjualan, kuota disesuaikan atomik di Redis)
 - [x] **Onboarding mitra versi dasar**: daftar dari web, `kyc_status` + `make verify`
 - [ ] Verifikasi dokumen & rekening mitra, peran super admin
@@ -21,6 +22,7 @@ Urut dari yang paling berdampak. Centang bila selesai.
 ## Fase 2 — keuangan
 
 - [ ] Saldo mitra: tertahan → tersedia (job harian sesuai kebijakan)
+- [ ] Kupon & harga bertahap (early bird)
 - [ ] Pengajuan payout + persetujuan maker-checker + Midtrans Payouts (sandbox)
 - [ ] Rekonsiliasi harian dengan laporan Midtrans; ganti estimasi biaya PG dengan angka asli
 - [ ] Refund (manual oleh mitra) + jurnal ledger refund
@@ -36,6 +38,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Content-Security-Policy, mulai dari mode `Report-Only` (perlu mengizinkan skrip & iframe Midtrans Snap)
 - [ ] Pemantauan stack produksi: uptime check + alert (Grafana, lihat butir observabilitas)
 - [ ] Ballot/undian untuk event super-favorit
+- [ ] Antrian lintas event (satu antrian untuk beberapa event yang dibuka bersamaan)
+- [ ] Halaman tunggu statis dari CDN; notifikasi "giliranmu" lewat email/WhatsApp
 - [ ] Notifikasi WhatsApp
 
 ## Sudah selesai (scaffold awal)

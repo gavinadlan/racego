@@ -38,7 +38,9 @@ make dev        # API :8080, worker, web :3000
 | Verifikasi penyelenggara (bila `AUTO_VERIFY_ORGS=false`) | `make verify ORG=slug` |
 | Lihat gambar unggahan | folder `backend/data/uploads/` (`UPLOAD_DIR`, tidak di-commit) |
 | Data contoh terasa basi | `make db-reset` — tanggal seed relatif terhadap hari ini |
-| Uji beban | `make db-reset && make loadtest` |
+| Uji beban | `make db-reset && make loadtest` (event tanpa antrian, butuh k6) |
+| Coba antrian virtual di browser | `make dev`, lalu `make queue-demo` (event demo kuota 50, penjualan 3 menit lagi) dan `node scripts/queue-sim.mjs bots --users 500 --event <id>` |
+| Uji beban antrian virtual | `make queue-load` (10.000 pengguna palsu, kuota 200; ubah dengan `USERS=… QUOTA=…`). Menyalakan API & worker sendiri di port 18080 |
 
 ## Masuk (login) di laptop
 
@@ -56,10 +58,11 @@ make grant EMAIL=kamu@gmail.com ORG=jakarta-runners ROLE=owner   # owner | admin
 
 Pemilih **Akun contoh (dev)** di header (Budi, Sari, Andi, Rina dari seed) hanya muncul bila `NEXT_PUBLIC_DEV_LOGIN=true` dan hanya diterima backend saat `APP_ENV=development`. Memilih akun contoh otomatis keluar dari sesi sungguhan.
 
-Tes yang butuh Postgres (`SessionStore`, reconciler, dan uji portal mitra di `internal/server/portal_test.go`: isolasi tenant, aturan terbit & penjualan, kuota bersamaan) jalan bila `RACEGO_TEST_DATABASE_URL` diisi. Uji portal membuat lalu menghapus datanya sendiri (email `…@uji.test`):
+Tes yang butuh Postgres (`SessionStore`, reconciler, uji portal mitra di `internal/server/portal_test.go`: isolasi tenant, aturan terbit & penjualan, kuota bersamaan, dan uji antrian lewat HTTP di `internal/server/queue_test.go`) jalan bila `RACEGO_TEST_DATABASE_URL` diisi. Uji portal membuat lalu menghapus datanya sendiri (email `…@uji.test`):
 
 ```bash
 cd backend && RACEGO_TEST_DATABASE_URL=$DATABASE_URL go test ./...
+cd backend && go test -race -run TestConcurrentJoinAdmitReserve ./internal/queue/   # 5.000 join + pemanggilan + reservasi paralel
 ```
 
 ## Menjalankan versi produksi

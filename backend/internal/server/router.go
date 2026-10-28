@@ -18,6 +18,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/partner"
 	"github.com/gavinadlan/racego/backend/internal/payment"
+	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 	"github.com/gavinadlan/racego/backend/internal/upload"
@@ -31,11 +32,16 @@ type Deps struct {
 	Snap   payment.SnapClient
 	Signer *ticket.Signer
 	Mailer *notify.Mailer
+	Queue  *queue.Queue
 }
 
 func NewRouter(d Deps) http.Handler {
-	events := event.NewHandler(d.DB, d.Inv)
+	events := event.NewHandler(d.DB, d.Inv, time.Duration(d.Cfg.Queue.LobbyMinutes)*time.Minute)
 	co := checkout.NewHandler(d.DB, d.Inv, d.Snap, d.Cfg.ReservationTTL, d.Cfg.FrontendURL)
+	if d.Queue != nil { // tanpa Queue, event ber-antrian selalu ditolak (403 queue_required)
+		co.SetQueue(d.Queue)
+	}
+	waiting := queue.NewHandler(d.DB, d.Queue)
 	pay := payment.NewProcessor(d.DB, d.Cfg.SigningKey())
 	if !d.Cfg.MidtransMock() {
 		co.SetRefresher(payment.NewReconciler(pay, d.Cfg.MidtransServerKey, d.Cfg.MidtransIsProduction))
@@ -61,7 +67,7 @@ func NewRouter(d Deps) http.Handler {
 			httpx.Error(w, http.StatusServiceUnavailable, "redis_down", err.Error())
 			return
 		}
-		httpx.JSON(w, http.StatusOK, map[string]any{"status": "ok", "midtrans_mock": d.Cfg.MidtransMock()})
+		httpx.JSON(w, http.StatusOK, map[string]any{"status": "ok", "env": d.Cfg.Env, "midtrans_mock": d.Cfg.MidtransMock()})
 	})
 
 	r.Get("/uploads/{name}", uploads.Serve)
@@ -89,6 +95,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/categories/{categoryID}/reservations", co.Reserve)
 			r.Post("/orders", co.CreateOrder)
 			r.Get("/orders/{orderID}", co.GetOrder)
+			r.Post("/events/{eventID}/queue", waiting.Join)
+			r.Get("/events/{eventID}/queue/me", waiting.Status)
+			r.Delete("/events/{eventID}/queue/me", waiting.Leave)
 			r.Post("/orgs", portal.CreateOrg)
 			r.Get("/orgs/slug-check", portal.SlugCheck)
 		})
@@ -102,6 +111,8 @@ func NewRouter(d Deps) http.Handler {
 			r.With(anyMember).Get("/events", events.OrgEvents)
 			r.With(anyMember).Get("/profile", portal.GetProfile)
 			r.With(anyMember).Get("/events/{eventID}", portal.GetEvent)
+			r.With(tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleFinance)).
+				Get("/events/{eventID}/queue", waiting.OrgSummary)
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleRPCStaff))
 				r.Post("/events/{eventID}/scan", tickets.Scan)
@@ -147,7 +158,7 @@ func cors(origin string) func(http.Handler) http.Handler {
 			h.Set("Vary", "Origin")
 			h.Set("Access-Control-Allow-Credentials", "true")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key, X-User-ID")
+			h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key, X-User-ID, X-Queue-Pass")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return

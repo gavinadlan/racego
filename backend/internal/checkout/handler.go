@@ -31,6 +31,7 @@ type Handler struct {
 	ttl         time.Duration
 	frontendURL string
 	refresher   StatusRefresher // nil di mode mock
+	queue       QueueGate
 
 	// Cache info kategori beberapa detik: saat war tiket ribuan request membaca baris yang sama,
 	// jadi cukup satu query per kategori per periode, bukan satu query per request.
@@ -80,24 +81,36 @@ type categoryInfo struct {
 	SaleOpenAt  time.Time
 	SaleCloseAt time.Time
 	FeeBps      int
+	WaitingRoom bool
 }
 
 func (h *Handler) loadCategory(ctx context.Context, id uuid.UUID) (categoryInfo, error) {
 	var c categoryInfo
 	err := h.db.QueryRow(ctx, `
 		SELECT c.id, c.event_id, c.org_id, c.code, c.name, c.price, c.max_per_user,
-		       e.name, e.status, e.sale_open_at, e.sale_close_at, o.fee_bps
+		       e.name, e.status, e.sale_open_at, e.sale_close_at, o.fee_bps, e.waiting_room
 		FROM ticket_categories c
 		JOIN events e ON e.id = c.event_id
 		JOIN organizations o ON o.id = c.org_id
 		WHERE c.id = $1`, id,
 	).Scan(&c.ID, &c.EventID, &c.OrgID, &c.Code, &c.Name, &c.Price, &c.MaxPerUser,
-		&c.EventName, &c.EventStatus, &c.SaleOpenAt, &c.SaleCloseAt, &c.FeeBps)
+		&c.EventName, &c.EventStatus, &c.SaleOpenAt, &c.SaleCloseAt, &c.FeeBps, &c.WaitingRoom)
 	return c, err
 }
 
+// QueueGate memeriksa pass antrian virtual (paket queue).
+type QueueGate interface {
+	// Check: nil bila pass sah & aktif; ErrQueueRequired / ErrQueuePassExpired bila tidak.
+	Check(ctx context.Context, eventID, userID, token string, now time.Time) error
+	ReleasePass(ctx context.Context, eventID, userID string) error
+}
+
+// SetQueue mengaktifkan pemeriksaan pass untuk event ber-antrian.
+func (h *Handler) SetQueue(g QueueGate) { h.queue = g }
+
 // Reserve: POST /v1/categories/{categoryID}/reservations {"qty": 1}
 // Jalur paling panas saat war tiket: satu query baca + satu skrip Lua di Redis.
+// Event ber-antrian: wajib header X-Queue-Pass; setelah reservasi berhasil pass dilepas.
 func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserID(r.Context())
 	categoryID, err := uuid.Parse(chi.URLParam(r, "categoryID"))
@@ -131,6 +144,10 @@ func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cat.WaitingRoom && !h.queuePass(w, r, cat, userID.String(), now) {
+		return
+	}
+
 	req := ReserveRequest{CategoryID: categoryID.String(), UserID: userID.String(), Qty: body.Qty, MaxPerUser: cat.MaxPerUser, TTL: h.ttl, Now: now}
 	res, err := h.inv.Reserve(r.Context(), req)
 	if errors.Is(err, ErrNotOpen) {
@@ -149,8 +166,33 @@ func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpx.Internal(w, r, err)
 	default:
+		if cat.WaitingRoom {
+			// Slot sudah aman: kembalikan kapasitas antrian. Untuk kategori lain pembeli antri lagi.
+			if err := h.queue.ReleasePass(r.Context(), cat.EventID.String(), userID.String()); err != nil {
+				slog.WarnContext(r.Context(), "lepas pass antrian", "event_id", cat.EventID, "err", err)
+			}
+		}
 		httpx.JSON(w, http.StatusCreated, res)
 	}
+}
+
+// queuePass memeriksa header X-Queue-Pass; false bila sudah membalas 403/500.
+func (h *Handler) queuePass(w http.ResponseWriter, r *http.Request, cat categoryInfo, userID string, now time.Time) bool {
+	err := ErrQueueRequired
+	if h.queue != nil {
+		err = h.queue.Check(r.Context(), cat.EventID.String(), userID, r.Header.Get("X-Queue-Pass"), now)
+	}
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, ErrQueuePassExpired):
+		httpx.Error(w, http.StatusForbidden, "queue_pass_expired", "Waktu giliranmu sudah habis. Masuk antrian lagi untuk mendaftar.")
+	case errors.Is(err, ErrQueueRequired):
+		httpx.Error(w, http.StatusForbidden, "queue_required", "Event ini memakai antrian. Masuk antrian dan tunggu giliranmu sebelum mendaftar.")
+	default:
+		httpx.Internal(w, r, err)
+	}
+	return false
 }
 
 type ParticipantInput struct {
@@ -203,6 +245,9 @@ type OrderResponse struct {
 	SnapToken   string    `json:"snap_token,omitempty"`
 	RedirectURL string    `json:"redirect_url,omitempty"`
 	Mock        bool      `json:"mock"`
+	Qty         int       `json:"qty"`
+	// Tiket terbit beberapa detik setelah lunas (worker); frontend polling sampai = qty.
+	TicketsIssued int `json:"tickets_issued"`
 }
 
 // CreateOrder: POST /v1/orders (header Idempotency-Key wajib).
@@ -307,7 +352,7 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := OrderResponse{OrderID: orderID, Status: "pending", Total: subtotal, ExpiresAt: expiresAt}
+	resp := OrderResponse{OrderID: orderID, Status: "pending", Total: subtotal, ExpiresAt: expiresAt, Qty: hold.Qty}
 	snapRes, err := h.snap.CreateTransaction(ctx, payment.SnapRequest{
 		OrderID:       orderID.String(),
 		GrossAmount:   subtotal,
@@ -375,8 +420,11 @@ func (h *Handler) SetRefresher(r StatusRefresher) { h.refresher = r }
 func (h *Handler) findOrder(ctx context.Context, where string, args ...any) (OrderResponse, bool, error) {
 	var o OrderResponse
 	var token, url *string
-	err := h.db.QueryRow(ctx, `SELECT id, status, total, expires_at, snap_token, payment_url FROM orders WHERE `+where, args...).
-		Scan(&o.OrderID, &o.Status, &o.Total, &o.ExpiresAt, &token, &url)
+	err := h.db.QueryRow(ctx, `
+		SELECT id, status, total, expires_at, snap_token, payment_url, qty,
+		       (SELECT count(*) FROM tickets t WHERE t.order_id = orders.id)
+		FROM orders WHERE `+where, args...).
+		Scan(&o.OrderID, &o.Status, &o.Total, &o.ExpiresAt, &token, &url, &o.Qty, &o.TicketsIssued)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, false, nil
 	}

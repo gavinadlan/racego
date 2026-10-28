@@ -13,6 +13,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
+	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 	"github.com/gavinadlan/racego/backend/internal/worker"
 )
@@ -41,8 +42,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	w := worker.New(db, checkout.NewInventory(rdb), signer,
-		notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom), cfg.FrontendURL)
+	passSigner, err := queue.NewPassSigner(cfg.Queue.Secret, cfg.IsDev())
+	if err != nil {
+		slog.Error("kunci antrian", "err", err)
+		os.Exit(1)
+	}
+	inv := checkout.NewInventory(rdb)
+	w := worker.New(db, inv, signer,
+		notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom), cfg.FrontendURL).
+		WithQueue(queue.NewRunner(db, queue.New(rdb, inv, passSigner, cfg.Queue)))
 	if !cfg.MidtransMock() {
 		// Cadangan webhook: cek status order ke Midtrans tiap menit (wajib saat development di localhost).
 		w.WithReconciler(payment.NewReconciler(

@@ -52,6 +52,7 @@ type EventDetail struct {
 	RacepackInfo string        `json:"racepack_info"`
 	ThemeColor   *string       `json:"theme_color"`
 	CoverURL     *string       `json:"cover_url"`
+	WaitingRoom  bool          `json:"waiting_room"`
 	HasOrders    bool          `json:"has_orders"`
 	Categories   []OrgCategory `json:"categories"`
 	Org          struct {
@@ -66,7 +67,7 @@ func (d EventDetail) input() EventInput {
 		Name: d.Name, Tagline: d.Tagline, Description: d.Description, Venue: d.Venue, City: d.City,
 		RaceDate: d.RaceDate, StartTime: d.StartTime,
 		SaleOpenAt: d.SaleOpenAt.Format(time.RFC3339), SaleCloseAt: d.SaleCloseAt.Format(time.RFC3339),
-		RacepackInfo: d.RacepackInfo,
+		RacepackInfo: d.RacepackInfo, WaitingRoom: &d.WaitingRoom,
 	}
 	if d.ThemeColor != nil {
 		in.ThemeColor = *d.ThemeColor
@@ -90,7 +91,7 @@ func (h *Handler) loadEvent(ctx context.Context, q querier, id uuid.UUID, lock b
 	sql := `
 		SELECT e.id, e.slug, e.status, e.name, e.tagline, e.description, e.venue, e.city,
 		       to_char(e.race_date, 'YYYY-MM-DD'), e.start_time, e.sale_open_at, e.sale_close_at,
-		       e.racepack_info, e.theme_color, e.cover_url,
+		       e.racepack_info, e.theme_color, e.cover_url, e.waiting_room,
 		       EXISTS (SELECT 1 FROM orders o WHERE o.event_id = e.id),
 		       o.name, o.kyc_status, o.theme_color
 		FROM events e JOIN organizations o ON o.id = e.org_id
@@ -100,7 +101,7 @@ func (h *Handler) loadEvent(ctx context.Context, q querier, id uuid.UUID, lock b
 	}
 	err := q.QueryRow(ctx, sql, id, tenant.OrgID(ctx)).Scan(&d.ID, &d.Slug, &d.Status, &d.Name, &d.Tagline, &d.Description,
 		&d.Venue, &d.City, &d.RaceDate, &d.StartTime, &d.SaleOpenAt, &d.SaleCloseAt, &d.RacepackInfo, &d.ThemeColor,
-		&d.CoverURL, &d.HasOrders, &d.Org.Name, &d.Org.KYCStatus, &d.Org.ThemeColor)
+		&d.CoverURL, &d.WaitingRoom, &d.HasOrders, &d.Org.Name, &d.Org.KYCStatus, &d.Org.ThemeColor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, errEventNotFound
 	}
@@ -291,10 +292,11 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO events (org_id, slug, name, tagline, description, venue, city, race_date, start_time,
-			                    sale_open_at, sale_close_at, racepack_info, theme_color, cover_url, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'draft') RETURNING id`,
+			                    sale_open_at, sale_close_at, racepack_info, theme_color, cover_url, waiting_room, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'draft') RETURNING id`,
 			orgID, slug, in.Name, in.Tagline, in.Description, in.Venue, in.City, in.RaceDate, in.StartTime,
 			in.SaleOpenAt, in.SaleCloseAt, in.RacepackInfo, nullIfEmpty(strings.ToUpper(in.ThemeColor)), nullIfEmpty(in.CoverURL),
+			in.WaitingRoom != nil && *in.WaitingRoom,
 		).Scan(&id); err != nil {
 			return err
 		}
@@ -331,15 +333,24 @@ func (h *Handler) UpdateEvent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if f := in.validate(h.now(), in.RaceDate != cur.RaceDate); len(f) > 0 {
+		f := in.validate(h.now(), in.RaceDate != cur.RaceDate)
+		if in.WaitingRoom == nil {
+			in.WaitingRoom = &cur.WaitingRoom
+		} else if *in.WaitingRoom != cur.WaitingRoom && cur.Status != "draft" && !h.now().Before(cur.SaleOpenAt) {
+			// Mengubah antrian di tengah war tiket mengubah aturan main bagi pembeli yang sudah menunggu.
+			f["waiting_room"] = "Antrian virtual tidak bisa diubah setelah penjualan dibuka"
+		}
+		if len(f) > 0 {
 			return validationError{f}
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE events SET name = $3, tagline = $4, description = $5, venue = $6, city = $7, race_date = $8,
-			       start_time = $9, sale_open_at = $10, sale_close_at = $11, racepack_info = $12, theme_color = $13, cover_url = $14
+			       start_time = $9, sale_open_at = $10, sale_close_at = $11, racepack_info = $12, theme_color = $13, cover_url = $14,
+			       waiting_room = $15
 			WHERE id = $1 AND org_id = $2`,
 			id, orgID, in.Name, in.Tagline, in.Description, in.Venue, in.City, in.RaceDate, in.StartTime,
-			in.SaleOpenAt, in.SaleCloseAt, in.RacepackInfo, nullIfEmpty(strings.ToUpper(in.ThemeColor)), nullIfEmpty(in.CoverURL)); err != nil {
+			in.SaleOpenAt, in.SaleCloseAt, in.RacepackInfo, nullIfEmpty(strings.ToUpper(in.ThemeColor)), nullIfEmpty(in.CoverURL),
+			*in.WaitingRoom); err != nil {
 			return err
 		}
 		return audit(ctx, tx, orgID, "event.updated", "event", id.String(), cur.input(), in)

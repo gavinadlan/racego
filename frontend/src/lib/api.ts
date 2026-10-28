@@ -115,6 +115,8 @@ export type EventDetail = EventSummary & {
   racepack_info: string;
   org: OrgBrief;
   categories: Category[];
+  waiting_room: boolean;
+  lobby_opens_at?: string; // hanya bila waiting_room
 };
 
 export type Organizer = OrgBrief & {
@@ -162,6 +164,8 @@ export type Order = {
   snap_token?: string;
   redirect_url?: string;
   mock: boolean;
+  qty: number;
+  tickets_issued: number; // tiket terbit beberapa detik setelah lunas (worker)
 };
 
 export type MyTicket = {
@@ -178,6 +182,7 @@ export type MyTicket = {
   category_code: string;
   category_name: string;
   org_name: string;
+  order_id: string;
 };
 
 export type Me = {
@@ -197,6 +202,7 @@ export type OrgEvent = {
   sold: number;
   collected: number;
   revenue: number;
+  waiting_room: boolean;
 };
 
 export type ScanTicket = {
@@ -297,15 +303,17 @@ export type EventInput = {
   racepack_info: string;
   theme_color: string;
   cover_url: string;
+  waiting_room: boolean;
 };
 
-export type PartnerEvent = Omit<EventInput, "theme_color" | "cover_url"> & {
+export type PartnerEvent = Omit<EventInput, "theme_color" | "cover_url" | "waiting_room"> & {
   id: string;
   slug: string;
   status: "draft" | "published" | "closed";
   theme_color: string | null;
   cover_url: string | null;
   has_orders: boolean;
+  waiting_room: boolean;
   categories: PartnerCategory[];
   org: { name: string; kyc_status: OrgProfile["kyc_status"]; theme_color: string };
 };
@@ -348,3 +356,38 @@ export const updateMember = (org: string, userId: string, role: Role) =>
   apiFetch<{ members: Member[] }>(`/v1/org/${org}/members/${userId}`, { method: "PATCH", body: { role } });
 export const removeMember = (org: string, userId: string) =>
   apiFetch<{ members: Member[] }>(`/v1/org/${org}/members/${userId}`, { method: "DELETE" });
+
+// ===== Antrian virtual (waiting room) =====
+
+export type QueueState = {
+  state: "lobby" | "waiting" | "admitted" | "sold_out" | "closed" | "not_in_queue";
+  position: number | null; // null di lobi: urutan baru dibekukan saat jam buka
+  ahead: number | null;
+  queue_size: number;
+  eta_seconds: number | null; // null = laju panggil belum terukur
+  pass?: string;
+  pass_expires_at?: string;
+  poll_after_ms: number; // 0 = tidak perlu polling lagi
+  server_time: string;
+  lobby_opens_at: string;
+  sale_open_at: string;
+};
+
+const queuePath = (eventId: string) => `/v1/events/${eventId}/queue`;
+export const joinQueue = (eventId: string) => apiFetch<QueueState>(queuePath(eventId), { method: "POST" });
+export const queueStatus = (eventId: string) => apiFetch<QueueState>(`${queuePath(eventId)}/me`);
+export const leaveQueue = (eventId: string) => apiFetch<void>(`${queuePath(eventId)}/me`, { method: "DELETE" });
+
+export type QueueSummary = {
+  waiting_room: boolean;
+  phase: "before_lobby" | "lobby" | "selling" | "closed";
+  lobby_opens_at: string;
+  sale_open_at: string;
+  queue_size: number;
+  active: number;
+  admitted_total: number;
+  final?: "sold_out" | "closed" | "";
+  max_active: number;
+  admit_per_sec: number;
+  server_time: string;
+};

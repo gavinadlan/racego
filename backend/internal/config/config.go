@@ -24,6 +24,8 @@ type Config struct {
 	QRPrivateKey   string // base64 seed Ed25519 (32 byte)
 	ReservationTTL time.Duration
 
+	Queue QueueConfig
+
 	AutoVerifyOrgs bool   // org baru langsung verified (default true hanya di development)
 	UploadDir      string // folder gambar unggahan (poster, logo)
 
@@ -31,6 +33,16 @@ type Config struct {
 	SMTPUsername string // kosong untuk Mailpit; isi untuk Resend/penyedia SMTP lain
 	SMTPPassword string
 	MailFrom     string
+}
+
+// QueueConfig mengatur antrian virtual (waiting room). Lihat docs/03-war-tiket.md.
+type QueueConfig struct {
+	Secret       string        // kunci HMAC pass antrian; wajib di luar development
+	LobbyMinutes int           // lobi dibuka sekian menit sebelum penjualan
+	AdmitPerSec  int           // laju pemanggilan per event
+	MaxActive    int           // pass aktif maksimum per event
+	PassTTL      time.Duration // masa berlaku pass
+	HeartbeatTTL time.Duration // tanpa polling selama ini = keluar antrian
 }
 
 // MockServerKey dipakai untuk menandatangani notifikasi palsu di mode mock.
@@ -50,12 +62,20 @@ func Load() Config {
 		MidtransIsProduction: getBool("MIDTRANS_IS_PRODUCTION", false),
 		QRPrivateKey:         os.Getenv("QR_PRIVATE_KEY"),
 		ReservationTTL:       getDuration("RESERVATION_TTL", 15*time.Minute),
-		AutoVerifyOrgs:       getBool("AUTO_VERIFY_ORGS", env == "development"),
-		UploadDir:            get("UPLOAD_DIR", "./data/uploads"),
-		SMTPAddr:             get("SMTP_ADDR", "localhost:1025"),
-		SMTPUsername:         os.Getenv("SMTP_USERNAME"),
-		SMTPPassword:         os.Getenv("SMTP_PASSWORD"),
-		MailFrom:             get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
+		Queue: QueueConfig{
+			Secret:       os.Getenv("QUEUE_SECRET"),
+			LobbyMinutes: getInt("QUEUE_LOBBY_MINUTES", 15),
+			AdmitPerSec:  getInt("QUEUE_ADMIT_PER_SEC", 20),
+			MaxActive:    getInt("QUEUE_MAX_ACTIVE", 300),
+			PassTTL:      getDuration("QUEUE_PASS_TTL", 10*time.Minute),
+			HeartbeatTTL: getDuration("QUEUE_HEARTBEAT_TTL", 45*time.Second),
+		},
+		AutoVerifyOrgs: getBool("AUTO_VERIFY_ORGS", env == "development"),
+		UploadDir:      get("UPLOAD_DIR", "./data/uploads"),
+		SMTPAddr:       get("SMTP_ADDR", "localhost:1025"),
+		SMTPUsername:   os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
+		MailFrom:       get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
 	}
 }
 

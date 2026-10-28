@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   canEdit,
@@ -19,6 +19,7 @@ import {
   type EventSummary,
   type OrgProfile,
   type PartnerEvent,
+  type QueueSummary,
 } from "@/lib/api";
 import { formatRupiah, formatWIB, fromWIBInput, todayWIB, toWIBInput } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
@@ -109,7 +110,21 @@ function rowsFrom(e: PartnerEvent): Row[] {
 
 function infoFrom(e: PartnerEvent | null): Info {
   if (!e) {
-    return { name: "", tagline: "", description: "", venue: "", city: "", race_date: "", start_time: "05:00", sale_open: "", sale_close: "", racepack_info: "", theme_color: "", cover_url: "" };
+    return {
+      name: "",
+      tagline: "",
+      description: "",
+      venue: "",
+      city: "",
+      race_date: "",
+      start_time: "05:00",
+      sale_open: "",
+      sale_close: "",
+      racepack_info: "",
+      theme_color: "",
+      cover_url: "",
+      waiting_room: false,
+    };
   }
   return {
     name: e.name,
@@ -124,6 +139,7 @@ function infoFrom(e: PartnerEvent | null): Info {
     racepack_info: e.racepack_info,
     theme_color: e.theme_color ?? "",
     cover_url: e.cover_url ?? "",
+    waiting_room: e.waiting_room,
   };
 }
 
@@ -420,6 +436,31 @@ function EventForm({
               <input className={inputErr(errors.sale_close)} type="datetime-local" value={info.sale_close} onChange={set("sale_close")} />
             </Field>
           </div>
+          <div className="mt-6 rounded-md bg-card p-4 ring-1 ring-line">
+            <label className={`flex items-start gap-3 ${saleStarted ? "cursor-not-allowed" : "cursor-pointer"}`}>
+              <input
+                type="checkbox"
+                className="mt-1 size-4 accent-hivis"
+                checked={info.waiting_room}
+                disabled={saleStarted}
+                onChange={(e) => setInfo((s) => ({ ...s, waiting_room: e.target.checked }))}
+                aria-describedby="waiting-room-hint"
+              />
+              <span>
+                <span className="block text-sm font-semibold">Aktifkan antrian virtual</span>
+                <span id="waiting-room-hint" className="mt-1 block text-xs text-muted">
+                  Disarankan untuk event yang peminatnya jauh melebihi kuota. Pembeli masuk lobi sebelum penjualan dibuka, urutan lobi diundi saat jam buka,
+                  lalu dipanggil bertahap sehingga server tidak kewalahan. {saleStarted ? <b className="text-asphalt">Terkunci karena penjualan sudah dibuka.</b> : "Tidak bisa diubah setelah penjualan dibuka."}
+                </span>
+                {errors.waiting_room && (
+                  <span className="mt-1 block text-xs font-medium text-red-700" role="alert">
+                    {errors.waiting_room}
+                  </span>
+                )}
+              </span>
+            </label>
+          </div>
+          {event && event.waiting_room && status !== "draft" && <QueuePanel org={org} eventId={event.id} />}
         </Section>
 
         <Section
@@ -584,6 +625,48 @@ function EventForm({
         </p>
         {dialogError && <ErrorBox message={dialogError} />}
       </ConfirmDialog>
+    </div>
+  );
+}
+
+/** Ringkasan antrian langsung (owner/admin/keuangan), diperbarui tiap 5 detik. */
+function QueuePanel({ org, eventId }: { org: string; eventId: string }) {
+  const { data, error, reload } = useApi<QueueSummary>(`/v1/org/${org}/events/${eventId}/queue`);
+  useEffect(() => {
+    const t = setInterval(reload, 5000);
+    return () => clearInterval(t);
+  }, [reload]);
+  const phase: Record<QueueSummary["phase"], string> = {
+    before_lobby: "Lobi belum dibuka",
+    lobby: "Lobi dibuka, menunggu jam buka",
+    selling: "Penjualan berjalan, pembeli dipanggil bertahap",
+    closed: "Penjualan selesai",
+  };
+  return (
+    <div className="mt-4 rounded-md bg-asphalt p-4 text-white">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-semibold">Antrian langsung</p>
+        <p className="text-xs text-white/70">
+          {data ? (data.final === "sold_out" ? "Kuota habis, antrian ditutup" : phase[data.phase]) : error ? error : "Memuat…"}
+        </p>
+      </div>
+      {data && (
+        <dl className="mt-3 grid grid-cols-3 gap-3 text-center">
+          {(
+            [
+              ["Di antrian", data.queue_size],
+              [`Pass aktif (maks ${data.max_active})`, data.active],
+              ["Terpanggil total", data.admitted_total],
+            ] as const
+          ).map(([label, value]) => (
+            <div key={label}>
+              <dd className="font-display text-4xl leading-none font-black tabular-nums">{value.toLocaleString("id-ID")}</dd>
+              <dt className="mt-1 text-xs text-white/70">{label}</dt>
+            </div>
+          ))}
+        </dl>
+      )}
+      {data && <p className="mt-3 text-xs text-white/60">Lobi dibuka {formatWIB(data.lobby_opens_at)}. Dipanggil {data.admit_per_sec} orang per detik.</p>}
     </div>
   );
 }

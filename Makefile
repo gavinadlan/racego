@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs migrate seed db-reset grant verify keygen api worker web dev test test-backend lint-web build loadtest \
+.PHONY: help setup up down logs migrate seed db-reset grant verify keygen api worker web dev test test-backend lint-web build loadtest queue-demo queue-load \
 	prod-build prod-up prod-down prod-logs prod-migrate prod-seed prod-grant prod-verify backup restore demo demo-down
 
 help: ## Tampilkan daftar perintah
@@ -69,6 +69,15 @@ build: ## Build binary backend & frontend produksi
 
 loadtest: ## Uji beban war tiket dengan k6 (butuh k6 terpasang)
 	k6 run loadtest/war-tiket.js
+
+queue-demo: ## Event demo ber-antrian (kuota 50, buka 3 menit lagi); butuh make dev
+	node scripts/queue-sim.mjs demo
+
+USERS ?= 10000
+QUOTA ?= 200
+queue-load: ## Uji beban antrian virtual: make queue-load USERS=10000 QUOTA=200
+	cd backend && go build -o bin/ ./cmd/api ./cmd/worker
+	node scripts/queue-sim.mjs load --users $(USERS) --quota $(QUOTA) --spawn
 
 # ===== Produksi (docker-compose.prod.yml + .env.prod), panduan: docs/10-deploy.md =====
 # Variabel dari .env development (di-export di atas) dibuang dulu: compose mengutamakan environment

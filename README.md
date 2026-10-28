@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/gavinadlan/racego/actions/workflows/ci.yml/badge.svg)](https://github.com/gavinadlan/racego/actions/workflows/ci.yml)
 
-Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menjual tiket fun run 5K, 10K, half marathon, dan full marathon di satu web. Pembayaran lewat **Midtrans**, tiket **QR** terbit otomatis setelah lunas, dan staf mitra men-scan QR saat pengambilan race pack — semuanya dirancang tahan **war tiket** (puluhan ribu orang di detik yang sama).
+Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menjual tiket fun run 5K, 10K, half marathon, dan full marathon di satu web. Pembayaran lewat **Midtrans**, tiket **QR** terbit otomatis setelah lunas, dan staf mitra men-scan QR saat pengambilan race pack — semuanya dirancang tahan **war tiket** (puluhan ribu orang di detik yang sama), dengan **antrian virtual** opsional untuk event yang paling diburu.
 
 > Proyek pribadi / portofolio. Infra 100% gratis, pembayaran memakai Midtrans **sandbox** atau mode **mock**.
 
@@ -12,13 +12,13 @@ Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menj
 RaceGo/
 ├── backend/            API + worker (Go, modular monolith)
 │   ├── cmd/            api · worker · migrate · keygen · healthcheck
-│   ├── internal/       checkout · payment · ticket · ledger · tenant · event · worker · ...
+│   ├── internal/       checkout · queue · payment · ticket · ledger · tenant · event · worker · ...
 │   └── migrations/     skema SQL + seed data contoh
 ├── frontend/           Web Next.js 16 (pelari, dashboard mitra, scanner race pack)
 ├── docs/               PRD, arsitektur, war tiket, pembayaran, tiket QR, infra gratis, API, deploy, ADR
 ├── loadtest/           Skrip k6 uji beban war tiket
 ├── deploy/Caddyfile    Reverse proxy produksi (HTTPS otomatis, header keamanan)
-├── scripts/            gen-secrets · backup · restore · demo · check-ip-spoof
+├── scripts/            gen-secrets · backup · restore · demo · check-ip-spoof · queue-sim
 ├── docker-compose.yml       Postgres · Redis · Mailpit untuk development
 ├── docker-compose.prod.yml  Stack produksi lengkap (caddy, web, api, worker, postgres, redis)
 ├── .github/workflows/  CI: tes backend + Postgres, build frontend, build image
@@ -61,6 +61,7 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | `make verify ORG=…` | Verifikasi penyelenggara agar bisa menerbitkan event (bila `AUTO_VERIFY_ORGS=false`) |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
 | `make loadtest` | Uji beban war tiket dengan k6 |
+| `make queue-demo` / `make queue-load` | Event demo ber-antrian untuk dicoba di browser / uji beban antrian virtual (10.000 pengguna palsu) |
 | `make prod-up` / `make demo` | Stack produksi di server / demo dari laptop (lihat [Deploy](#deploy)) |
 
 ## Deploy
@@ -84,10 +85,11 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | |
 | Kalender bulanan & daftar, arsip race, halaman penyelenggara | Verifikasi dokumen & rekening mitra |
 | Multi-tenant (mitra, peran, isolasi data) | |
-| Reservasi atomik Redis + timer + pengembalian kuota | Waiting room / antrian virtual |
+| Reservasi atomik Redis + timer + pengembalian kuota | Turnstile / anti-bot, ballot |
+| Antrian virtual opsional per event (lobi diundi, pemanggilan bertahap, pass HMAC) | Antrian lintas event |
 | Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan dana via Midtrans Payouts |
 | Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
-| Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | |
+| Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | Kupon & harga bertahap |
 | Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund |
 | Scanner race pack (kamera, manual, anti dobel scan) | Row-Level Security Postgres |
 | Ledger double-entry + email tiket | Observabilitas (Grafana) |

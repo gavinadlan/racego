@@ -17,15 +17,17 @@ export function OrderStatusView() {
   const [now, setNow] = useState(() => Date.now());
   const [simError, setSimError] = useState<string | null>(null);
 
-  // Status lunas datang dari webhook (asinkron) — polling tiap 2 detik selama masih pending.
+  // Status lunas datang dari webhook (asinkron), tiket dari worker beberapa detik kemudian:
+  // polling tiap 2 detik selama masih pending, atau sudah lunas tapi tiket belum semua terbit.
+  const issuing = order?.status === "paid" && order.tickets_issued < order.qty;
   useEffect(() => {
-    if (order?.status !== "pending") return;
+    if (order?.status !== "pending" && !issuing) return;
     const t = setInterval(() => {
       setNow(Date.now());
       reload();
     }, 2000);
     return () => clearInterval(t);
-  }, [order?.status, reload]);
+  }, [order?.status, issuing, reload]);
 
   if (!ready) return <Loading />;
   if (!userId) return <LoginHint />;
@@ -87,11 +89,24 @@ export function OrderStatusView() {
         )}
 
         {order.status === "paid" && (
-          <div className="mt-4">
-            <p className="text-sm text-muted">Pembayaran diterima. Tiket QR sedang diterbitkan dan dikirim ke email.</p>
-            <Link href="/tickets" className="mt-4 inline-block rounded-md bg-hivis px-4 py-2 text-sm font-semibold text-asphalt">
-              Lihat tiket saya →
-            </Link>
+          <div className="mt-4" aria-live="polite">
+            {issuing ? (
+              <>
+                <p className="text-sm text-muted">
+                  Pembayaran diterima. <b className="text-asphalt">Tiket sedang diterbitkan…</b> ({order.tickets_issued} dari {order.qty})
+                </p>
+                <span className="mt-4 inline-block cursor-not-allowed rounded-md bg-hivis px-4 py-2 text-sm font-semibold text-asphalt opacity-40" aria-disabled="true">
+                  Lihat tiket saya →
+                </span>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted">Pembayaran diterima. {order.qty} tiket QR sudah terbit dan dikirim ke email.</p>
+                <Link href={`/tickets?order=${order.order_id}`} className="mt-4 inline-block rounded-md bg-hivis px-4 py-2 text-sm font-semibold text-asphalt">
+                  Lihat tiket saya →
+                </Link>
+              </>
+            )}
           </div>
         )}
         {(order.status === "expired" || order.status === "cancelled") && (

@@ -20,12 +20,13 @@ import (
 )
 
 type Handler struct {
-	db  *pgxpool.Pool
-	inv *checkout.Inventory
+	db    *pgxpool.Pool
+	inv   *checkout.Inventory
+	lobby time.Duration // antrian virtual: lobi dibuka sekian lama sebelum penjualan
 }
 
-func NewHandler(db *pgxpool.Pool, inv *checkout.Inventory) *Handler {
-	return &Handler{db: db, inv: inv}
+func NewHandler(db *pgxpool.Pool, inv *checkout.Inventory, lobby time.Duration) *Handler {
+	return &Handler{db: db, inv: inv, lobby: lobby}
 }
 
 // Summary adalah satu event di daftar, kalender, arsip, dan halaman penyelenggara.
@@ -222,6 +223,9 @@ type Detail struct {
 	RacepackInfo string     `json:"racepack_info"`
 	Org          OrgBrief   `json:"org"`
 	Categories   []Category `json:"categories"`
+	WaitingRoom  bool       `json:"waiting_room"`
+	// Hanya bila waiting_room: kapan lobi antrian dibuka.
+	LobbyOpensAt *time.Time `json:"lobby_opens_at,omitempty"`
 }
 
 // Get: GET /v1/events/{eventID}
@@ -237,12 +241,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		SELECT e.id, e.slug, e.name, e.tagline, e.city, e.venue, e.race_date, e.start_time,
 		       e.sale_open_at, e.sale_close_at, COALESCE(e.theme_color, o.theme_color), e.cover_url,
 		       o.name, o.slug, e.description, e.racepack_info,
-		       o.slug, o.name, o.city, o.description, o.theme_color, o.logo_url, e.status
+		       o.slug, o.name, o.city, o.description, o.theme_color, o.logo_url, e.status, e.waiting_room
 		FROM events e JOIN organizations o ON o.id = e.org_id
 		WHERE e.id = $1 AND e.status IN ('published', 'closed') AND o.kyc_status = 'verified'`, id,
 	).Scan(&d.ID, &d.Slug, &d.Name, &d.Tagline, &d.City, &d.Venue, &d.RaceDate, &d.StartTime,
 		&d.SaleOpenAt, &d.SaleCloseAt, &d.ThemeColor, &d.CoverURL, &d.OrgName, &d.OrgSlug, &d.Description, &d.RacepackInfo,
-		&d.Org.Slug, &d.Org.Name, &d.Org.City, &d.Org.Description, &d.Org.ThemeColor, &d.Org.LogoURL, &dbStatus)
+		&d.Org.Slug, &d.Org.Name, &d.Org.City, &d.Org.Description, &d.Org.ThemeColor, &d.Org.LogoURL, &dbStatus, &d.WaitingRoom)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(w, http.StatusNotFound, "event_not_found", "Event tidak ditemukan")
 		return
@@ -252,6 +256,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Status = saleStatus(time.Now(), d.RaceDate, d.SaleOpenAt, d.SaleCloseAt, dbStatus)
+	if d.WaitingRoom {
+		t := d.SaleOpenAt.Add(-h.lobby)
+		d.LobbyOpensAt = &t
+	}
 
 	rows, err := h.db.Query(r.Context(), `
 		SELECT id, code, name, distance_km::float8, price, quota, max_per_user
