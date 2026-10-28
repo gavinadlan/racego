@@ -36,7 +36,7 @@ func Load() Config {
 		Env:                  get("APP_ENV", "development"),
 		HTTPAddr:             get("HTTP_ADDR", ":8080"),
 		FrontendURL:          get("FRONTEND_URL", "http://localhost:3000"),
-		DatabaseURL:          get("DATABASE_URL", "postgres://racego:racego@localhost:5433/racego?sslmode=disable"),
+		DatabaseURL:          get("DATABASE_URL", "postgres://racego:racego@localhost:55432/racego?sslmode=disable"),
 		RedisAddr:            get("REDIS_ADDR", "localhost:6380"),
 		RedisPassword:        os.Getenv("REDIS_PASSWORD"),
 		MidtransServerKey:    os.Getenv("MIDTRANS_SERVER_KEY"),

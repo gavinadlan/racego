@@ -40,7 +40,7 @@ Buka http://localhost:3000 lalu pilih akun contoh di menu **Dev** (kanan atas):
 | Andi | Staf RPC Jakarta | **Scan race pack**: QR valid → hijau, scan ulang → kuning |
 | Rina | Owner Bandung Trail | Coba buka data Jakarta → ditolak (isolasi multi-tenant) |
 
-Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di port **5433** dan Redis di **6380** (bukan port bawaan) supaya tidak bentrok dengan instalasi lain di Mac.
+Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di port **55432** dan Redis di **6380** (bukan port bawaan) supaya tidak bentrok dengan instalasi lain di Mac.
 
 ## Perintah penting
 

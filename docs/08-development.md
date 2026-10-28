@@ -15,7 +15,7 @@ Versi minimal: Go 1.24, Node.js 20, Docker Compose v2.
 ```bash
 cd ~/code/RaceGo
 make setup      # buat .env + go.sum + node_modules
-make up         # Postgres :5433, Redis :6380, Mailpit :8025
+make up         # Postgres :55432, Redis :6380, Mailpit :8025
 make migrate
 make seed
 make dev        # API :8080, worker, web :3000
@@ -49,8 +49,9 @@ make dev        # API :8080, worker, web :3000
 | Gejala | Penyebab / solusi |
 | --- | --- |
 | `koneksi database gagal` | Infra belum jalan → `make up`; cek `docker compose ps` |
-| `role "racego" does not exist` | Program tersambung ke Postgres lain di Mac, bukan yang di Docker. Pastikan `.env` memakai port **5433** (`cp .env.example .env`), lalu `make down && make up` |
-| Port 5433/6380 sudah dipakai | Ubah port di `docker-compose.yml` dan `DATABASE_URL`/`REDIS_ADDR` di `.env` |
+| `role "racego" does not exist` | Program tersambung ke Postgres lain di Mac, bukan yang di Docker. Pastikan `.env` memakai port **55432** (`cp .env.example .env`), lalu `make down && make up` |
+| `password authentication failed for user "racego"` padahal password benar | Ada Postgres lain di Mac yang mendengarkan di `localhost` pada port yang sama; macOS mengarahkan koneksi ke situ, bukan ke Docker. Cek dengan `sudo lsof -nP -iTCP:55432 -sTCP:LISTEN`, lalu pindahkan port (baris di bawah) |
+| Port 55432/6380 sudah dipakai | Ubah port di `docker-compose.yml` dan `DATABASE_URL`/`REDIS_ADDR` di `.env` |
 | Halaman web "Tidak bisa terhubung ke server" | API belum jalan atau `NEXT_PUBLIC_API_URL` salah |
 | Tiket tidak muncul setelah bayar | Worker belum jalan (`make worker`) |
 | Kategori selalu `sale_not_open` | Jam penjualan seed sudah lewat 60 hari → `make db-reset` |
