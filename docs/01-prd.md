@@ -15,7 +15,7 @@ RaceGo adalah marketplace tiket event lari multi-penyelenggara: banyak company/i
 | Pelari | Daftar cepat saat war tiket, beli untuk teman, tiket QR |
 | Owner / admin mitra | Buat event, kuota, harga; lihat penjualan & saldo; ajukan pencairan |
 | Staf RPC (race pack collection) | Scan QR, cocokkan KTP, tandai race pack diambil |
-| Super admin platform | Verifikasi mitra, atur fee, setujui payout, pantau war tiket |
+| Super admin platform | Verifikasi mitra (tinjau identitas, dokumen, rekening; setujui/tolak dengan alasan) di `/admin`; nanti: atur fee, setujui payout, pantau war tiket. Diberikan hanya lewat perintah server, tidak bisa meninjau org tempat dia sendiri anggota |
 
 Satu user bisa menjadi pelari sekaligus staf di beberapa mitra (RBAC per tenant).
 
@@ -27,7 +27,8 @@ Satu user bisa menjadi pelari sekaligus staf di beberapa mitra (RBAC per tenant)
 4. Tiket QR + nomor BIB terbit otomatis, dikirim via email, tampil di **Tiket saya**.
 5. Dashboard mitra + scanner race pack di web yang sama.
 6. **Portal mitra mandiri**: siapa pun yang login bisa mendaftarkan penyelenggara, membuat event + kategori tiket, mengunggah poster/logo, menerbitkan event (setelah penyelenggara terverifikasi), dan mengundang staf. Tanpa campur tangan tim RaceGo selain verifikasi.
-7. Ledger double-entry; saldo mitra & pencairan via Midtrans Payouts menyusul (belum ada di versi ini).
+7. **Verifikasi mitra (KYC)**: owner mengirim jenis penyelenggara (perorangan/komunitas/badan usaha), identitas PIC, dokumen sesuai jenis, dan rekening bank; super admin menyetujui atau menolak dengan alasan, mitra memperbaiki lalu mengajukan ulang. Dokumen dan NIK/rekening/NPWP disimpan terenkripsi dan setiap aksesnya tercatat. Tanpa OCR, cek rekening otomatis, atau layanan KYC pihak ketiga. Kebijakan retensi data belum ditetapkan; ini bukan klaim kepatuhan hukum.
+8. Ledger double-entry; saldo mitra & pencairan via Midtrans Payouts menyusul (belum ada di versi ini).
 
 Di luar MVP: aplikasi native, live tracking, hasil race/timing chip, marketplace merchandise.
 

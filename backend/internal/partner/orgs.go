@@ -120,15 +120,23 @@ type Profile struct {
 	LogoURL     *string     `json:"logo_url"`
 	KYCStatus   string      `json:"kyc_status"`
 	Role        tenant.Role `json:"role"` // peran user yang sedang melihat
+	// Pengajuan verifikasi terbaru (null = belum pernah) untuk banner status; detailnya di /verification (owner).
+	VerificationStatus *string `json:"verification_status"`
+	RejectReason       *string `json:"reject_reason"`
 }
 
 func (h *Handler) loadProfile(ctx context.Context, q querier) (Profile, error) {
 	m := membership(ctx)
 	p := Profile{Role: m.Role}
 	err := q.QueryRow(ctx, `
-		SELECT slug, name, city, description, instagram, website, theme_color, logo_url, kyc_status
-		FROM organizations WHERE id = $1`, m.OrgID,
-	).Scan(&p.Slug, &p.Name, &p.City, &p.Description, &p.Instagram, &p.Website, &p.ThemeColor, &p.LogoURL, &p.KYCStatus)
+		SELECT o.slug, o.name, o.city, o.description, o.instagram, o.website, o.theme_color, o.logo_url, o.kyc_status,
+		       v.status, v.reject_reason
+		FROM organizations o
+		LEFT JOIN LATERAL (SELECT status, reject_reason FROM org_verifications
+		                   WHERE org_id = o.id ORDER BY attempt DESC LIMIT 1) v ON true
+		WHERE o.id = $1`, m.OrgID,
+	).Scan(&p.Slug, &p.Name, &p.City, &p.Description, &p.Instagram, &p.Website, &p.ThemeColor, &p.LogoURL, &p.KYCStatus,
+		&p.VerificationStatus, &p.RejectReason)
 	return p, err
 }
 

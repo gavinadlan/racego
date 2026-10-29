@@ -11,7 +11,13 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] **Turnstile / anti-bot** di antrian & tombol Daftar, batas per NIK, deteksi akun ganda (antrian belum mencegahnya)
 - [x] **CRUD event & kategori** dari dashboard mitra (draft → published → closed, kunci harga setelah ada penjualan, kuota disesuaikan atomik di Redis)
 - [x] **Onboarding mitra versi dasar**: daftar dari web, `kyc_status` + `make verify`
-- [ ] Verifikasi dokumen & rekening mitra, peran super admin
+- [x] **Verifikasi mitra (KYC)**: identitas, dokumen per jenis penyelenggara, rekening bank; terenkripsi (AES-256-GCM), akses tercatat; super admin meninjau di `/admin`, tolak dengan alasan + ajukan ulang
+- [ ] 2FA untuk super admin
+- [ ] Kebijakan retensi & job penghapusan/anonimisasi data verifikasi
+- [ ] Rotasi `KYC_ENC_KEY` (format `v1:` sudah siap untuk versi kunci baru)
+- [ ] Pencabutan/penangguhan org terverifikasi
+- [ ] Verifikasi ulang saat owner mengganti rekening bank
+- [ ] Notifikasi super admin saat ada pengajuan baru
 - [ ] **Row-Level Security** Postgres untuk tabel milik mitra
 - [ ] Export peserta (CSV/XLSX) untuk mitra
 - [x] Upload poster event & logo penyelenggara (disk lokal, EXIF dibuang)

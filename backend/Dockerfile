@@ -9,12 +9,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/... \
- && mkdir -p /out/data/uploads
+ && mkdir -p /out/data/uploads /out/data/kyc
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/ /app/
-# Folder volume unggahan dibuat dengan pemilik nonroot agar volume baru ikut bisa ditulis.
+# Folder volume unggahan & dokumen KYC dibuat dengan pemilik nonroot agar volume baru ikut bisa ditulis.
 COPY --from=build --chown=nonroot:nonroot /out/data /data
 EXPOSE 8080
 USER nonroot

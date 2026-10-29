@@ -129,3 +129,30 @@ func OTPEmail(code string) (string, string) {
 		html.EscapeString(code))
 	return subject, body
 }
+
+// VerificationEmail: status verifikasi mitra untuk owner. event = submitted | approved | rejected.
+// Sengaja TIDAK memuat data sensitif (NIK, nomor rekening, NPWP); hanya nama org, status, dan alasan.
+func VerificationEmail(orgName, event, reason, pageURL string) (string, string) {
+	org := html.EscapeString(orgName)
+	var subject, msg string
+	switch event {
+	case "submitted":
+		subject = "Pengajuan verifikasi " + orgName + " diterima"
+		msg = fmt.Sprintf(`<p>Pengajuan verifikasi <b>%s</b> sudah kami terima dan sedang menunggu peninjauan tim RaceGo.</p>
+<p>Selama ditinjau, isian dan dokumen tidak bisa diubah. Kami kabari lewat email setelah selesai.</p>`, org)
+	case "approved":
+		subject = orgName + " sudah terverifikasi"
+		msg = fmt.Sprintf(`<p><b>%s</b> sudah terverifikasi. Sekarang kamu bisa menerbitkan event.</p>`, org)
+	default:
+		subject = "Pengajuan verifikasi " + orgName + " perlu diperbaiki"
+		msg = fmt.Sprintf(`<p>Pengajuan verifikasi <b>%s</b> belum bisa kami setujui. Alasannya:</p>
+<blockquote style="margin:12px 0;padding:10px 14px;border-left:4px solid #ff5a1f;background:#fff4ef">%s</blockquote>
+<p>Buka halaman verifikasi, klik <b>Ajukan ulang</b>, perbaiki, lalu kirim lagi.</p>`, org, strings.ReplaceAll(html.EscapeString(reason), "\n", "<br>"))
+	}
+	body := fmt.Sprintf(`<div style="font-family:system-ui,sans-serif;max-width:560px">
+<h2>Verifikasi penyelenggara</h2>
+%s
+<p><a href="%s" style="display:inline-block;margin-top:16px;padding:10px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">Buka halaman verifikasi</a></p></div>`,
+		msg, html.EscapeString(pageURL))
+	return subject, body
+}

@@ -58,7 +58,8 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | `make test` | Tes backend (termasuk 1.000 pembeli berebut 50 slot → tepat 50 sukses) + lint & type-check frontend |
 | `make db-reset` | Hapus semua data lalu migrasi + seed ulang |
 | `make grant EMAIL=… ORG=… ROLE=…` | Beri akun sungguhan peran di penyelenggara |
-| `make verify ORG=…` | Verifikasi penyelenggara agar bisa menerbitkan event (bila `AUTO_VERIFY_ORGS=false`) |
+| `make superadmin EMAIL=…` | Jadikan akun super admin: meninjau verifikasi mitra di `/admin` |
+| `make verify ORG=…` | Jalan pintas: verifikasi penyelenggara tanpa pengajuan (bila `AUTO_VERIFY_ORGS=false`) |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
 | `make loadtest` | Uji beban war tiket dengan k6 |
 | `make queue-demo` / `make queue-load` | Event demo ber-antrian untuk dicoba di browser / uji beban antrian virtual (10.000 pengguna palsu) |
@@ -70,7 +71,7 @@ Satu perintah menjalankan seluruh aplikasi dalam mode produksi di server Linux m
 
 ```bash
 cp .env.prod.example .env.prod
-scripts/gen-secrets.sh        # password acak + kunci QR (cadangkan .env.prod!)
+scripts/gen-secrets.sh        # password acak + kunci QR & KYC (cadangkan kuncinya terpisah dari backup!)
 nano .env.prod                # SITE_ADDRESS, SMTP, Midtrans sandbox
 make prod-up                  # build, migrasi otomatis, tunggu semua sehat
 ```
@@ -83,13 +84,14 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | --- | --- |
 | Login email + kode OTP, sesi cookie, halaman akun | Login Google |
 | Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | |
-| Kalender bulanan & daftar, arsip race, halaman penyelenggara | Verifikasi dokumen & rekening mitra |
+| Kalender bulanan & daftar, arsip race, halaman penyelenggara | 2FA super admin, retensi data verifikasi |
 | Multi-tenant (mitra, peran, isolasi data) | |
 | Reservasi atomik Redis + timer + pengembalian kuota | Turnstile / anti-bot, ballot |
 | Antrian virtual opsional per event (lobi diundi, pemanggilan bertahap, pass HMAC) | Antrian lintas event |
 | Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan dana via Midtrans Payouts |
 | Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
 | Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | Kupon & harga bertahap |
+| Verifikasi mitra: dokumen & rekening terenkripsi, peninjauan super admin `/admin` | Rotasi kunci enkripsi |
 | Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund |
 | Scanner race pack (kamera, manual, anti dobel scan) | Row-Level Security Postgres |
 | Ledger double-entry + email tiket | Observabilitas (Grafana) |

@@ -160,6 +160,8 @@ func (w *Worker) handle(ctx context.Context, tx pgx.Tx, m message) error {
 		return w.onOrderReleased(ctx, tx, p.OrderID)
 	case "ticket.email":
 		return w.onTicketEmail(ctx, tx, p.OrderID)
+	case "kyc.email":
+		return w.onVerificationEmail(ctx, tx, m.Payload)
 	default:
 		slog.WarnContext(ctx, "topic outbox tidak dikenal", "topic", m.Topic)
 		return nil
@@ -257,6 +259,39 @@ func (w *Worker) onTicketEmail(ctx context.Context, tx pgx.Tx, orderID uuid.UUID
 	}
 	subject, body := notify.TicketEmail(buyerName, eventName, w.frontendURL+"/tickets", lines)
 	return w.mailer.Send(buyerEmail, subject, body)
+}
+
+// onVerificationEmail: kabar status verifikasi mitra ke satu owner (pesan outbox per owner).
+func (w *Worker) onVerificationEmail(ctx context.Context, tx pgx.Tx, payload json.RawMessage) error {
+	var p struct {
+		VerificationID uuid.UUID `json:"verification_id"`
+		Event          string    `json:"event"`
+		UserID         uuid.UUID `json:"user_id"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("payload: %w", err)
+	}
+	var email, orgName, slug string
+	var reason *string
+	err := tx.QueryRow(ctx, `
+		SELECT u.email, o.name, o.slug, v.reject_reason FROM org_verifications v
+		JOIN organizations o ON o.id = v.org_id, users u
+		WHERE v.id = $1 AND u.id = $2`, p.VerificationID, p.UserID).Scan(&email, &orgName, &slug, &reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // org/akun sudah dihapus: tidak ada yang perlu dikirimi
+	}
+	if err != nil {
+		return err
+	}
+	subject, body := notify.VerificationEmail(orgName, p.Event, deref(reason), w.frontendURL+"/org/"+slug+"/verifikasi")
+	return w.mailer.Send(email, subject, body)
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // ===== Job berkala =====

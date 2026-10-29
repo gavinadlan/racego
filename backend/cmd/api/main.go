@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
 	"github.com/gavinadlan/racego/backend/internal/queue"
+	"github.com/gavinadlan/racego/backend/internal/secretbox"
 	"github.com/gavinadlan/racego/backend/internal/server"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 )
@@ -33,6 +36,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg := config.Load()
+	// Kunci KYC dicek sebelum apa pun: di luar development tanpa kunci, API tidak boleh start.
+	kycBox, err := secretbox.FromEnv(cfg.KYCEncKey, cfg.IsDev())
+	if err != nil {
+		return err
+	}
+	if inside(cfg.KYCDir, cfg.UploadDir) {
+		return errors.New("KYC_DIR tidak boleh berada di dalam UPLOAD_DIR (folder unggahan publik)")
+	}
 
 	db, err := platform.NewDB(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -68,6 +79,7 @@ func run() error {
 		Handler: server.NewRouter(server.Deps{
 			Cfg: cfg, DB: db, Redis: rdb, Inv: inv, Snap: snap, Signer: signer,
 			Queue:  queue.New(rdb, inv, passSigner, cfg.Queue),
+			KYCBox: kycBox,
 			Mailer: notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -90,4 +102,15 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// inside: true bila path dir berada di dalam (atau sama dengan) parent.
+func inside(dir, parent string) bool {
+	a, err1 := filepath.Abs(dir)
+	b, err2 := filepath.Abs(parent)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	rel, err := filepath.Rel(b, a)
+	return err == nil && (rel == "." || !strings.HasPrefix(rel, ".."))
 }

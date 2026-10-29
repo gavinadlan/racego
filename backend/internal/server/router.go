@@ -15,10 +15,12 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/event"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
+	"github.com/gavinadlan/racego/backend/internal/kyc"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/partner"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/queue"
+	"github.com/gavinadlan/racego/backend/internal/secretbox"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 	"github.com/gavinadlan/racego/backend/internal/upload"
@@ -33,6 +35,7 @@ type Deps struct {
 	Signer *ticket.Signer
 	Mailer *notify.Mailer
 	Queue  *queue.Queue
+	KYCBox *secretbox.Box // kunci enkripsi dokumen & data sensitif verifikasi mitra
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -51,6 +54,7 @@ func NewRouter(d Deps) http.Handler {
 	authH := auth.NewHandler(d.DB, auth.NewOTPStore(d.Redis), sessions, d.Mailer, d.Cfg.IsDev())
 	portal := partner.NewHandler(d.DB, d.Inv, d.Cfg.AutoVerifyOrgs)
 	uploads := upload.NewHandler(upload.Disk{Dir: d.Cfg.UploadDir})
+	verif := kyc.NewHandler(d.DB, d.Redis, d.KYCBox, d.Cfg.KYCDir, d.Cfg.AutoVerifyOrgs)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, realIP(d.Cfg.TrustedProxyHops), middleware.Recoverer)
@@ -138,7 +142,25 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/members", portal.AddMember)
 				r.Patch("/members/{userID}", portal.UpdateMember)
 				r.Delete("/members/{userID}", portal.RemoveMember)
+				r.Get("/verification", verif.Get)
+				r.Put("/verification", verif.Save)
+				r.Post("/verification/documents", verif.Upload)
+				r.Get("/verification/documents/{kind}", verif.Document)
+				r.Delete("/verification/documents/{kind}", verif.DeleteDocument)
+				r.Post("/verification/submit", verif.Submit)
+				r.Post("/verification/reopen", verif.Reopen)
 			})
+		})
+
+		// Super admin platform: selain super admin dibalas 404 (keberadaan halaman tidak bocor).
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(auth.Require, kyc.RequireSuperAdmin(d.DB))
+			r.Get("/verifications", verif.AdminList)
+			r.Get("/verifications/{id}", verif.AdminGet)
+			r.Post("/verifications/{id}/reveal", verif.AdminReveal)
+			r.Get("/verifications/{id}/documents/{kind}", verif.AdminDocument)
+			r.Post("/verifications/{id}/approve", verif.AdminApprove)
+			r.Post("/verifications/{id}/reject", verif.AdminReject)
 		})
 
 		// Simulasi pembayaran tanpa Midtrans: development, atau mode mock (MIDTRANS_SERVER_KEY kosong,

@@ -611,6 +611,14 @@ function EventForm({
         </ul>
         <p className="text-muted">Setelah terbit, event tampil di beranda, kalender, dan halaman penyelenggara. Penjualan dibuka {formatWIB(fromWIBInput(info.sale_open))}.</p>
         {dialogError && <ErrorBox message={dialogError} />}
+        {orgInfo.kyc_status !== "verified" && (
+          <p>
+            {/* Tutup dulu: route lama tetap terpasang (tersembunyi), dialog modal yang masih terbuka memblokir halaman baru. */}
+            <Link href={`/org/${org}/verifikasi`} onClick={() => setDialog(null)} className="font-semibold underline decoration-hivis decoration-2 underline-offset-4">
+              Buka halaman verifikasi penyelenggara
+            </Link>
+          </p>
+        )}
       </ConfirmDialog>
 
       <ConfirmDialog open={dialog === "close"} title="Tutup penjualan?" confirmLabel="Tutup penjualan" danger busy={busy} onClose={() => setDialog(null)} onConfirm={() => act("close")}>

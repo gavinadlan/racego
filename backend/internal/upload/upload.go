@@ -45,7 +45,17 @@ func Process(data []byte) (name string, clean []byte, err error) {
 	if len(data) > MaxBytes {
 		return "", nil, ErrTooLarge
 	}
-	var ext string
+	ext, clean, err := Reencode(data)
+	if err != nil {
+		return "", nil, err
+	}
+	sum := sha256.Sum256(clean)
+	return hex.EncodeToString(sum[:]) + ext, clean, nil
+}
+
+// Reencode memeriksa bahwa data benar-benar JPEG/PNG lalu meng-encode ulang (membuang EXIF/GPS).
+// Mengembalikan ekstensi ".jpg" atau ".png". Batas ukuran byte diatur pemanggil.
+func Reencode(data []byte) (ext string, clean []byte, err error) {
 	switch http.DetectContentType(data) {
 	case "image/jpeg":
 		ext = ".jpg"
@@ -75,8 +85,7 @@ func Process(data []byte) (name string, clean []byte, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	sum := sha256.Sum256(buf.Bytes())
-	return hex.EncodeToString(sum[:]) + ext, buf.Bytes(), nil
+	return ext, buf.Bytes(), nil
 }
 
 // Storage menyimpan file berdasarkan nama. Implementasi sekarang disk lokal; nanti bisa S3/R2.

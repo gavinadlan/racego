@@ -51,7 +51,7 @@ Aturan kode: 6 digit, berlaku 10 menit, sekali pakai, maks 5 percobaan salah. Ki
 
 | Method | Path | Body / header | Respons penting |
 | --- | --- | --- | --- |
-| GET | `/v1/me` | | `id`, `name`, `email`, `phone`, `orgs` (mitra & peran) |
+| GET | `/v1/me` | | `id`, `name`, `email`, `phone`, `orgs` (mitra & peran), `is_super_admin` |
 | PATCH | `/v1/me` | `{"name","phone"}` | 200 profil terbaru · 422 `invalid_name` (2–100 karakter) / `invalid_phone` (format Indonesia `08…`/`628…`/`+628…`, disimpan sebagai `08…`; kosong = dihapus) |
 | POST | `/v1/categories/{categoryID}/reservations` | `{"qty": 2}`; event ber-antrian: header `X-Queue-Pass` | 201 `reservation_id`, `expires_at`, `remaining` (pass antrian dilepas) · 409 `sold_out` / `limit_exceeded` / `sale_not_open` · 403 `queue_required` (tanpa pass, pass tidak sah/milik orang lain/sudah dipakai/dicabut) / `queue_pass_expired` |
 | POST | `/v1/orders` | header `Idempotency-Key`; `{"category_id","reservation_id","participants":[…]}` | 201 `order_id`, `snap_token`, `redirect_url`, `mock` · 410 `reservation_expired` · 409 `reservation_used` · 422 validasi peserta |
@@ -88,7 +88,7 @@ Objek peserta:
 | Method | Path | Peran | Keterangan |
 | --- | --- | --- | --- |
 | GET | `/v1/org/{org}/events` | semua anggota | event mitra (termasuk draft) + status, terjual, diambil, penjualan, `waiting_room` |
-| GET | `/v1/org/{org}/profile` | semua anggota | profil org + `kyc_status` + `role` user |
+| GET | `/v1/org/{org}/profile` | semua anggota | profil org + `kyc_status` + `role` user + `verification_status` (pengajuan terbaru, `null` bila belum) + `reject_reason` |
 | PATCH | `/v1/org/{org}/profile` | owner, admin | `{"name","city","description","instagram","website","theme_color","logo_url"}`; slug tidak bisa diubah |
 | POST | `/v1/org/{org}/uploads?kind=cover\|logo` | owner, admin | multipart field `file` → 201 `{"url":"/uploads/<hash>.jpg"}` · 413 `file_too_large` · 422 `invalid_image` / `image_too_big` |
 | POST | `/v1/org/{org}/events` | owner, admin | event + `categories` (opsional) → 201 draft lengkap · 422 `validation` / `too_many_drafts` |
@@ -108,6 +108,45 @@ Objek peserta:
 | GET | `/v1/org/{org}/events/{eventID}/tickets?q=` | owner, admin, rpc_staff | statistik + pencarian nama / BIB / 4 digit akhir NIK |
 
 Bukan anggota → 404 `org_not_found`. Peran tidak cukup → 403 `forbidden`. Event/kategori milik org lain → 404.
+
+### Verifikasi mitra (owner saja)
+
+Semua respons sukses (kecuali unduhan dokumen) = keadaan lengkap: `kyc_status`, `auto_verify`, `verification` (pengajuan terbaru atau `null`; NIK/NPWP/rekening **tersamar** `••••1234`, `documents[]`), `history[]` (semua pengajuan: `attempt`, `status`, `submitted_at`, `reviewed_at`, `reject_reason`), `requirements` (matriks jenis & dokumen, daftar bank, teks + versi persetujuan, `max_bytes`). Status pengajuan: `draft` → `submitted` → `approved` | `rejected`.
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| GET | `/v1/org/{org}/verification` | keadaan di atas |
+| PUT | `/v1/org/{org}/verification` | simpan draft (dibuat otomatis bila belum ada): `{"org_type","legal_name","address","pic_name","pic_phone","pic_id"?,"npwp"?,"bank_code","bank_name","account_number"?,"account_holder"}`. `pic_id`/`npwp`/`account_number`: tidak dikirim = tidak diubah, `""` = dihapus. Format: NIK 16 digit, NPWP 15/16 digit, rekening 6–20 digit, HP Indonesia, `bank_code` dari daftar (`lainnya` + `bank_name` bebas). Mengganti `org_type` membuang dokumen yang tidak dipakai jenis baru. 422 `validation` |
+| POST | `/v1/org/{org}/verification/documents` | multipart `kind` + `file` (JPG/PNG/PDF ≤ 5 MB, tipe dari isi). Mengganti dokumen jenis yang sama. 413 `file_too_large` · 422 `invalid_document` / `pdf_encrypted` / `pdf_active_content` / `image_too_big` / `validation` (`kind` tidak dipakai jenis ini, jenis belum dipilih) · 429 `too_many_requests` (30 unggahan/jam/akun, `retry_after`) |
+| DELETE | `/v1/org/{org}/verification/documents/{kind}` | hapus dokumen draft · 404 `not_found` |
+| GET | `/v1/org/{org}/verification/documents/{kind}` | berkas sendiri dari pengajuan terbaru, didekripsi; tercatat `kyc.document.view` (`by: owner`). Header: `Content-Type` hasil validasi, `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, `Content-Security-Policy: sandbox; default-src 'none'`, `Content-Disposition: inline; filename*=…` |
+| POST | `/v1/org/{org}/verification/submit` | `{"consent": true}` → `submitted`, email ke owner. 422 `validation` per kolom, mis. `documents.ktp_pic`, `account_number`, `consent` |
+| POST | `/v1/org/{org}/verification/reopen` | hanya dari `rejected`: pengajuan baru (`attempt+1`, `draft`) berisi salinan isian & dokumen · 409 `invalid_status` |
+
+Ubah/unggah/hapus saat pengajuan `submitted` → 409 `not_editable`; setelah `rejected` tanpa ajukan ulang → 409 `reopen_required`; org sudah `verified` (termasuk `AUTO_VERIFY_ORGS=true`) → 409 `already_verified`. Peran selain owner → 403 `forbidden`; status cukup dibaca dari `/profile`.
+
+Matriks dokumen (`requirements.types`):
+
+| `org_type` | Wajib | Opsional |
+| --- | --- | --- |
+| `perorangan` | `ktp_pic` | `npwp` |
+| `komunitas` | `ktp_pic`, `surat_keterangan` | `npwp` |
+| `badan_usaha` | `ktp_pic`, `npwp`, `akta_pendirian`, `sk_kemenkumham` (+ nomor NPWP) | `nib`, `surat_kuasa` |
+
+## Super admin (`/v1/admin/…`)
+
+Anonim → 401 `unauthenticated`. Login tapi bukan super admin → **404** `not_found` (keberadaan rute tidak bocor). Super admin hanya diberikan lewat `make superadmin EMAIL=…`; tidak ada endpoint untuk itu.
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| GET | `/v1/admin/verifications?status=&q=&page=` | `status` `submitted` (default, terlama dikirim dulu) / `approved` / `rejected` (terbaru ditinjau dulu); `q` = nama org/nama sesuai dokumen; 20 per halaman. → `items[]` (`id`, `org_name`, `org_slug`, `org_type`, `legal_name`, `attempt`, `status`, `submitted_at`, `reviewed_at`), `counts` per status, `total`, `page`, `page_size` |
+| GET | `/v1/admin/verifications/{id}` | `verification` (tersamar), `documents[]` + `duplicate_orgs` (org lain yang mengunggah berkas identik, dari SHA-256), `org`, `members`, `history`, `name_match` (`ok`, `holder`, `expected[]`, `rule`; petunjuk, bukan penentu), `reviewer`, `conflict_of_interest`, `requirements`. Draft → 404 |
+| POST | `/v1/admin/verifications/{id}/reveal` | `{"field":"pic_id"\|"account"\|"npwp"}` → `{"field","value"}` (nilai lengkap); tercatat `kyc.field.reveal` |
+| GET | `/v1/admin/verifications/{id}/documents/{kind}` | dokumen terdekripsi (header sama seperti di atas); tercatat `kyc.document.view` (`by: super_admin`) |
+| POST | `/v1/admin/verifications/{id}/approve` | → org `verified` + email; respons = detail |
+| POST | `/v1/admin/verifications/{id}/reject` | `{"reason"}` 10–1.000 karakter (422 `fields.reason`) → org `rejected` + email berisi alasan |
+
+Approve/reject: 403 `conflict_of_interest` bila super admin anggota org itu; 409 `invalid_status` bila bukan `submitted`. Kunci enkripsi salah/berkas rusak → 500 `decrypt_failed` (tidak pernah mengirim data rusak).
 
 Form event (`POST`/`PATCH`):
 

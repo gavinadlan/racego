@@ -5,6 +5,7 @@
 //	go run ./cmd/migrate reset  # jalankan semua *.down.sql (HAPUS data!)
 //	go run ./cmd/migrate grant <email> <org-slug> <role>  # jadikan akun anggota mitra
 //	go run ./cmd/migrate verify <org-slug>                # verifikasi mitra (boleh menerbitkan event)
+//	go run ./cmd/migrate superadmin <email>               # jadikan akun super admin platform (/admin)
 package main
 
 import (
@@ -28,7 +29,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>|verify <org-slug>")
+		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>|verify <org-slug>|superadmin <email>")
 	}
 	ctx := context.Background()
 	cfg := config.Load()
@@ -61,6 +62,11 @@ func main() {
 			log.Fatal("pemakaian: migrate verify <org-slug>")
 		}
 		err = verify(ctx, db, os.Args[2])
+	case "superadmin":
+		if len(os.Args) != 3 {
+			log.Fatal("pemakaian: migrate superadmin <email>")
+		}
+		err = superAdmin(ctx, db, os.Args[2])
 	default:
 		err = fmt.Errorf("perintah tidak dikenal: %s", os.Args[1])
 	}
@@ -206,5 +212,25 @@ func verify(ctx context.Context, db *pgxpool.Pool, slug string) error {
 		return err
 	}
 	fmt.Printf("✓ %s (%s) terverifikasi, sekarang bisa menerbitkan event\n", name, slug)
+	return nil
+}
+
+// superAdmin menjadikan akun (yang sudah pernah login) super admin platform. Sengaja hanya lewat
+// perintah ini: tidak ada endpoint web untuk memberi peran super admin.
+func superAdmin(ctx context.Context, db *pgxpool.Pool, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	var id, name string
+	err := db.QueryRow(ctx, `UPDATE users SET is_super_admin = true WHERE email = $1 RETURNING id::text, name`, email).Scan(&id, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("akun %s belum ada; masuk dulu sekali di web dengan email itu", email)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO audit_logs (action, entity, entity_id, after)
+		VALUES ('user.super_admin_granted', 'user', $1, '{"is_super_admin":true}')`, id); err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s (%s) sekarang super admin; buka /admin setelah masuk\n", name, email)
 	return nil
 }

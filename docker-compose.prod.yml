@@ -101,8 +101,15 @@ services:
   api:
     <<: *backend
     command: ["/app/api"]
+    environment:
+      <<: *backend-env
+      # Dokumen verifikasi mitra (terenkripsi, privat; tidak ada rute statis). Hanya api yang memegang kunci;
+      # kunci WAJIB dicadangkan terpisah dari backup data.
+      KYC_DIR: /data/kyc
+      KYC_ENC_KEY: ${KYC_ENC_KEY:?jalankan scripts/gen-secrets.sh}
     volumes:
       - uploads:/data/uploads
+      - kyc:/data/kyc
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -217,5 +224,6 @@ volumes:
   pgdata:
   redisdata:
   uploads:
+  kyc:
   caddy_data:
   caddy_config:

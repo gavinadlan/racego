@@ -5,8 +5,8 @@ SHELL := /bin/bash
 export
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs migrate seed db-reset grant verify keygen api worker web dev test test-backend lint-web build loadtest queue-demo queue-load \
-	prod-build prod-up prod-down prod-logs prod-migrate prod-seed prod-grant prod-verify backup restore demo demo-down
+.PHONY: help setup up down logs migrate seed db-reset grant verify superadmin keygen api worker web dev test test-backend lint-web build loadtest queue-demo queue-load \
+	prod-build prod-up prod-down prod-logs prod-migrate prod-seed prod-grant prod-verify prod-superadmin backup restore demo demo-down
 
 help: ## Tampilkan daftar perintah
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -37,8 +37,11 @@ db-reset: ## HAPUS semua tabel lalu migrasi + seed ulang
 grant: ## Beri peran mitra: make grant EMAIL=kamu@x.com ORG=jakarta-runners ROLE=owner
 	cd backend && go run ./cmd/migrate grant "$(EMAIL)" "$(ORG)" "$(ROLE)"
 
-verify: ## Verifikasi mitra agar bisa menerbitkan event: make verify ORG=slug
+verify: ## Verifikasi mitra tanpa alur pengajuan (darurat/dev): make verify ORG=slug
 	cd backend && go run ./cmd/migrate verify "$(ORG)"
+
+superadmin: ## Jadikan akun super admin (/admin): make superadmin EMAIL=kamu@x.com (sudah pernah login)
+	cd backend && go run ./cmd/migrate superadmin "$(EMAIL)"
 
 keygen: ## Buat kunci Ed25519 untuk QR tiket (tempel ke QR_PRIVATE_KEY)
 	cd backend && go run ./cmd/keygen
@@ -57,8 +60,8 @@ dev: ## Jalankan api + worker + web sekaligus
 
 test: test-backend lint-web ## Semua tes
 
-test-backend: ## Tes unit backend
-	cd backend && go vet ./... && go test ./...
+test-backend: ## Tes backend (butuh make up: tes Postgres memakai DATABASE_URL bila RACEGO_TEST_DATABASE_URL kosong)
+	cd backend && go vet ./... && RACEGO_TEST_DATABASE_URL=$${RACEGO_TEST_DATABASE_URL:-$$DATABASE_URL} go test ./...
 
 lint-web: ## Lint + type-check frontend
 	cd frontend && npm run lint && npx next typegen && npx tsc --noEmit
@@ -110,8 +113,11 @@ prod-seed: ## Isi data contoh di produksi (untuk demo; tanggal relatif hari ini)
 prod-grant: ## Peran mitra produksi: make prod-grant EMAIL=kamu@x.com ORG=slug ROLE=owner
 	@$(PROD) run --rm migrate /app/migrate grant "$(EMAIL)" "$(ORG)" "$(ROLE)"
 
-prod-verify: ## Verifikasi mitra produksi: make prod-verify ORG=slug
+prod-verify: ## Verifikasi mitra produksi tanpa alur pengajuan: make prod-verify ORG=slug
 	@$(PROD) run --rm migrate /app/migrate verify "$(ORG)"
+
+prod-superadmin: ## Super admin produksi: make prod-superadmin EMAIL=kamu@x.com (sudah pernah login)
+	@$(PROD) run --rm migrate /app/migrate superadmin "$(EMAIL)"
 
 backup: ## Backup database + unggahan ke backups/ (simpan 7 terakhir)
 	@$(CLEAN_ENV) scripts/backup.sh

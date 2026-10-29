@@ -25,20 +25,24 @@
 
 	encode zstd gzip
 
-	# Sedikit di atas batas unggah poster/logo (3 MB).
+	# Sedikit di atas batas unggah terbesar (dokumen verifikasi 5 MB; poster/logo 3 MB dicek API).
 	request_body {
-		max_size 4MB
+		max_size 6MB
 	}
 
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
-		X-Frame-Options DENY
 		# Kamera untuk scanner tiket di origin sendiri. CSP belum dipasang: popup Midtrans Snap
 		# memuat skrip & iframe dari domain Midtrans (lihat roadmap: CSP Report-Only).
 		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 		-Server
 	}
+	# Dokumen verifikasi dipratinjau di <iframe> halaman admin/mitra (origin sama); sisanya tidak boleh dibingkai.
+	@kycdoc path_regexp ^/v1/(org/[^/]+/verification|admin/verifications/[^/]+)/documents/
+	header @kycdoc X-Frame-Options SAMEORIGIN
+	@notkycdoc not path_regexp ^/v1/(org/[^/]+/verification|admin/verifications/[^/]+)/documents/
+	header @notkycdoc X-Frame-Options DENY
 	# HSTS hanya untuk domain sungguhan; di localhost akan memaksa HTTPS ke semua port lokal.
 	@hsts not host localhost 127.0.0.1
 	header @hsts Strict-Transport-Security "max-age=31536000"

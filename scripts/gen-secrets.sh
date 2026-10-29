@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Mengisi rahasia kosong di .env.prod: POSTGRES_USER, POSTGRES_PASSWORD, REDIS_PASSWORD, QUEUE_SECRET, QR_PRIVATE_KEY.
+# Mengisi rahasia kosong di .env.prod: POSTGRES_USER, POSTGRES_PASSWORD, REDIS_PASSWORD, QUEUE_SECRET, KYC_ENC_KEY, QR_PRIVATE_KEY.
+# KYC_ENC_KEY yang sudah terisi TIDAK PERNAH ditimpa (kunci berubah = dokumen verifikasi tak terbaca).
 # Nilai yang sudah terisi tidak ditimpa tanpa konfirmasi. Nilai rahasia tidak pernah dicetak.
 #   scripts/gen-secrets.sh            (dari root repo)
 set -euo pipefail
@@ -60,6 +61,18 @@ fill POSTGRES_USER pg_user "Postgres hanya memakai user/password ini saat volume
 fill POSTGRES_PASSWORD pw "Postgres hanya memakai user/password ini saat volume pgdata pertama dibuat; mengganti nanti membuat api tidak bisa login."
 fill REDIS_PASSWORD pw
 fill QUEUE_SECRET pw "Mengganti QUEUE_SECRET membatalkan pass antrian yang sedang dipegang pembeli (aman di luar jam war tiket)."
+
+# Kunci KYC: hanya diisi bila kosong, tanpa pilihan menimpa.
+if [[ -n $(current KYC_ENC_KEY) ]]; then
+  echo "• KYC_ENC_KEY: sudah terisi, TIDAK diubah (mengganti kunci = dokumen verifikasi tidak bisa dibuka)"
+else
+  set_var KYC_ENC_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+  cat <<'WARN'
+• KYC_ENC_KEY: diisi.
+  !!! Cadangkan KYC_ENC_KEY SEKARANG di tempat terpisah dari backup data (mis. pengelola password). !!!
+  Tanpa kunci ini, dokumen verifikasi & NIK/rekening/NPWP di backup TIDAK BISA dipulihkan.
+WARN
+fi
 
 if [[ -n $(current QR_PRIVATE_KEY) ]]; then
   cat <<'WARN'

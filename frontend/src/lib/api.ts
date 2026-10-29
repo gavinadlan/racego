@@ -191,6 +191,7 @@ export type Me = {
   email: string;
   phone: string | null;
   orgs: { slug: string; name: string; role: string }[];
+  is_super_admin: boolean; // super admin platform: menu Admin & halaman /admin
 };
 
 export type OrgEvent = {
@@ -269,6 +270,8 @@ export type OrgProfile = {
   logo_url: string | null;
   kyc_status: "pending" | "verified" | "rejected";
   role: Role;
+  verification_status: VerificationStatus | null; // pengajuan terbaru (null = belum pernah)
+  reject_reason: string | null;
 };
 
 export type CategoryInput = {
@@ -391,3 +394,152 @@ export type QueueSummary = {
   admit_per_sec: number;
   server_time: string;
 };
+
+// ===== Verifikasi mitra (KYC) =====
+
+export type VerificationStatus = "draft" | "submitted" | "approved" | "rejected";
+export type OrgType = "perorangan" | "komunitas" | "badan_usaha";
+export type DocKind = "ktp_pic" | "npwp" | "surat_keterangan" | "akta_pendirian" | "sk_kemenkumham" | "nib" | "surat_kuasa";
+
+/** Matriks jenis & dokumen dari backend (satu sumber, tidak diduplikasi di frontend). */
+export type KycRequirements = {
+  types: { type: OrgType; label: string; description: string; required: DocKind[]; optional: DocKind[]; holder_rule: string }[];
+  documents: Record<DocKind, string>;
+  banks: { code: string; name: string }[];
+  consent: { version: string; text: string };
+  max_bytes: number;
+};
+
+export type KycDoc = { kind: DocKind; label: string; name: string; content_type: string; size: number; created_at: string };
+
+/** Pengajuan; pic_id, npwp, account selalu tersamar ("••••1234") atau "". */
+export type Verification = {
+  id: string;
+  attempt: number;
+  status: VerificationStatus;
+  org_type: OrgType | "";
+  legal_name: string;
+  address: string;
+  pic_name: string;
+  pic_phone: string;
+  pic_id: string;
+  npwp: string;
+  bank_code: string;
+  bank_name: string;
+  account: string;
+  account_holder: string;
+  consent_at: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  reject_reason: string | null;
+  created_at: string;
+  documents: KycDoc[] | null;
+};
+
+export type VerificationHistory = { id: string; attempt: number; status: VerificationStatus; submitted_at: string | null; reviewed_at: string | null; reject_reason: string | null };
+
+export type VerificationState = {
+  kyc_status: OrgProfile["kyc_status"];
+  auto_verify: boolean;
+  verification: Verification | null;
+  history: VerificationHistory[];
+  requirements: KycRequirements;
+};
+
+/** pic_id/npwp/account_number: undefined = tidak diubah (nilai lama tidak pernah dikirim ke browser). */
+export type VerificationInput = {
+  org_type: OrgType | "";
+  legal_name: string;
+  address: string;
+  pic_name: string;
+  pic_phone: string;
+  pic_id?: string;
+  npwp?: string;
+  bank_code: string;
+  bank_name: string;
+  account_number?: string;
+  account_holder: string;
+};
+
+const verif = (org: string, rest = "") => `/v1/org/${org}/verification${rest}`;
+export const saveVerification = (org: string, body: VerificationInput) => apiFetch<VerificationState>(verif(org), { method: "PUT", body });
+export const deleteKycDocument = (org: string, kind: DocKind) => apiFetch<VerificationState>(verif(org, `/documents/${kind}`), { method: "DELETE" });
+export const submitVerification = (org: string, consent: boolean) =>
+  apiFetch<VerificationState>(verif(org, "/submit"), { method: "POST", body: { consent } });
+export const reopenVerification = (org: string) => apiFetch<VerificationState>(verif(org, "/reopen"), { method: "POST" });
+/** URL berkas (cookie sesi); v = cache-buster saat berkas diganti. */
+export const kycDocUrl = (org: string, d: KycDoc) => `${API_URL}${verif(org, `/documents/${d.kind}`)}?v=${encodeURIComponent(d.created_at)}`;
+
+/** Unggah dokumen dengan progres (fetch belum punya progres unggah, jadi XHR). */
+export function uploadKycDocument(org: string, kind: DocKind, file: File, onProgress: (pct: number) => void) {
+  return new Promise<VerificationState>((resolve, reject) => {
+    const form = new FormData();
+    form.append("kind", kind);
+    form.append("file", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_URL}${verif(org, "/documents")}`);
+    xhr.withCredentials = true;
+    const userId = getDevUserId();
+    if (userId) xhr.setRequestHeader("X-User-ID", userId);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+    xhr.onerror = () => reject(new ApiError(0, "network", "Tidak bisa terhubung ke server. Periksa koneksi lalu coba lagi."));
+    xhr.onload = () => {
+      let data: Record<string, unknown> = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        /* respons bukan JSON, mis. dari proxy */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as VerificationState);
+      else if (xhr.status === 413) reject(new ApiError(413, "file_too_large", "Ukuran berkas maksimal 5 MB."));
+      else {
+        const fields = data.fields as Record<string, string> | undefined;
+        const msg = fields ? Object.values(fields).join(" ") : (data.message as string | undefined);
+        reject(new ApiError(xhr.status, (data.error as string) ?? "unknown", msg ?? `Error ${xhr.status}`, data.retry_after as number | undefined, fields));
+      }
+    };
+    xhr.send(form);
+  });
+}
+
+// ===== Super admin =====
+
+export type AdminListItem = {
+  id: string;
+  org_name: string;
+  org_slug: string;
+  org_type: OrgType | null;
+  legal_name: string;
+  attempt: number;
+  status: VerificationStatus;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+};
+
+export type AdminList = {
+  items: AdminListItem[];
+  counts: Record<"submitted" | "approved" | "rejected", number>;
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type AdminVerification = {
+  verification: Verification;
+  documents: (KycDoc & { duplicate_orgs: string[] | null })[];
+  org: { slug: string; name: string; city: string; kyc_status: OrgProfile["kyc_status"]; created_at: string };
+  members: { name: string; email: string; role: Role }[];
+  history: VerificationHistory[];
+  name_match: { ok: boolean; holder: string; expected: string[]; rule: string };
+  reviewer: string | null;
+  conflict_of_interest: boolean;
+  requirements: KycRequirements;
+};
+
+const adminV = (id: string, rest = "") => `/v1/admin/verifications/${id}${rest}`;
+export const revealField = (id: string, field: "pic_id" | "account" | "npwp") =>
+  apiFetch<{ field: string; value: string }>(adminV(id, "/reveal"), { method: "POST", body: { field } });
+export const approveVerification = (id: string) => apiFetch<AdminVerification>(adminV(id, "/approve"), { method: "POST" });
+export const rejectVerification = (id: string, reason: string) =>
+  apiFetch<AdminVerification>(adminV(id, "/reject"), { method: "POST", body: { reason } });
+export const adminDocUrl = (id: string, kind: DocKind) => `${API_URL}${adminV(id, `/documents/${kind}`)}`;

@@ -29,6 +29,9 @@ type Config struct {
 	AutoVerifyOrgs bool   // org baru langsung verified (default true hanya di development)
 	UploadDir      string // folder gambar unggahan (poster, logo)
 
+	KYCEncKey string // base64 32 byte; kunci enkripsi dokumen & data sensitif verifikasi mitra
+	KYCDir    string // folder privat dokumen KYC terenkripsi (bukan di dalam UploadDir)
+
 	SMTPAddr     string
 	SMTPUsername string // kosong untuk Mailpit; isi untuk Resend/penyedia SMTP lain
 	SMTPPassword string
@@ -72,6 +75,8 @@ func Load() Config {
 		},
 		AutoVerifyOrgs: getBool("AUTO_VERIFY_ORGS", env == "development"),
 		UploadDir:      get("UPLOAD_DIR", "./data/uploads"),
+		KYCEncKey:      os.Getenv("KYC_ENC_KEY"),
+		KYCDir:         get("KYC_DIR", "./data/kyc"),
 		SMTPAddr:       get("SMTP_ADDR", "localhost:1025"),
 		SMTPUsername:   os.Getenv("SMTP_USERNAME"),
 		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),

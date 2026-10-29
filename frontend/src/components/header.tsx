@@ -110,6 +110,11 @@ function AccountMenu() {
               Jadi penyelenggara
             </Link>
           )}
+          {me.is_super_admin && (
+            <Link href="/admin" className={`${item} font-semibold`} onClick={close}>
+              Admin
+            </Link>
+          )}
           <Link href="/akun" className={item} onClick={close}>
             Akun
           </Link>

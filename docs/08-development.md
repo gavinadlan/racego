@@ -35,7 +35,9 @@ make dev        # API :8080, worker, web :3000
 | Masuk ke database | `docker compose exec postgres psql -U racego` |
 | Lihat stok di Redis | `docker compose exec redis redis-cli get '{cat:cccccccc-0000-0000-0000-000000000021}:stock'` |
 | Beri peran mitra ke akunmu | `make grant EMAIL=… ORG=jakarta-runners ROLE=owner` |
-| Verifikasi penyelenggara (bila `AUTO_VERIFY_ORGS=false`) | `make verify ORG=slug` |
+| Jadikan akunmu super admin (halaman `/admin`) | `make superadmin EMAIL=…` (sudah pernah login) |
+| Verifikasi penyelenggara tanpa alur pengajuan (jalan pintas) | `make verify ORG=slug` |
+| Lihat dokumen verifikasi (terenkripsi) | folder `backend/data/kyc/` (`KYC_DIR`, tidak di-commit; isinya ciphertext) |
 | Lihat gambar unggahan | folder `backend/data/uploads/` (`UPLOAD_DIR`, tidak di-commit) |
 | Data contoh terasa basi | `make db-reset` — tanggal seed relatif terhadap hari ini |
 | Uji beban | `make db-reset && make loadtest` (event tanpa antrian, butuh k6) |
@@ -48,7 +50,9 @@ make dev        # API :8080, worker, web :3000
 2. Ambil kodenya: di development kode **dicatat di log API** (`make dev` / `make api`, baris `kode OTP (dev)`). Email-nya juga terkirim ke Mailpit (http://localhost:8025) bila `SMTP_ADDR=localhost:1025`, atau ke inbox sungguhan bila `.env` memakai SMTP Gmail/Resend.
 3. Akun baru diarahkan ke **Lengkapi profil**, lalu kembali ke halaman asal.
 
-Akun baru hanyalah pelari. Untuk jadi penyelenggara: menu akun → **Jadi penyelenggara** (`/daftar-mitra`). Di development `AUTO_VERIFY_ORGS=true`, jadi org baru langsung bisa menerbitkan event; set `false` untuk mencoba alur verifikasi, lalu `make verify ORG=slug`. Staf ditambahkan owner dari tab **Tim** (orangnya harus sudah pernah login).
+Akun baru hanyalah pelari. Untuk jadi penyelenggara: menu akun → **Jadi penyelenggara** (`/daftar-mitra`). Di development `AUTO_VERIFY_ORGS=true`, jadi org baru langsung bisa menerbitkan event (tab **Verifikasi** menulis "Diverifikasi otomatis (mode development)").
+
+**Mencoba alur verifikasi sungguhan** tanpa mengubah `.env`: jalankan API dengan override di baris perintah, mis. `make api AUTO_VERIFY_ORGS=false` (worker & web seperti biasa). Lalu: akun A → **Jadi penyelenggara** → tab **Verifikasi**, isi 4 langkah dan kirim; akun B masuk sekali lalu `make superadmin EMAIL=b@…`; B buka menu akun → **Admin** (`/admin`) untuk menyetujui/menolak. Email status terkirim lewat worker (lihat Mailpit). Pratinjau dokumen memakai cookie sesi, jadi gunakan login email sungguhan, bukan pemilih **Akun contoh (dev)**. `KYC_ENC_KEY` kosong di development = kunci bawaan (ada peringatan di log); dokumen yang dibuat dengan kunci itu tidak terbaca bila kuncinya diganti. Staf ditambahkan owner dari tab **Tim** (orangnya harus sudah pernah login).
 
 Cara cepat lewat terminal (email harus sudah pernah login):
 
@@ -58,7 +62,7 @@ make grant EMAIL=kamu@gmail.com ORG=jakarta-runners ROLE=owner   # owner | admin
 
 Pemilih **Akun contoh (dev)** di header (Budi, Sari, Andi, Rina dari seed) hanya muncul bila `NEXT_PUBLIC_DEV_LOGIN=true` dan hanya diterima backend saat `APP_ENV=development`. Memilih akun contoh otomatis keluar dari sesi sungguhan.
 
-Tes yang butuh Postgres (`SessionStore`, reconciler, uji portal mitra di `internal/server/portal_test.go`: isolasi tenant, aturan terbit & penjualan, kuota bersamaan, dan uji antrian lewat HTTP di `internal/server/queue_test.go`) jalan bila `RACEGO_TEST_DATABASE_URL` diisi. Uji portal membuat lalu menghapus datanya sendiri (email `…@uji.test`):
+Tes yang butuh Postgres (`SessionStore`, reconciler, uji portal mitra di `internal/server/portal_test.go`: isolasi tenant, aturan terbit & penjualan, kuota bersamaan, uji antrian lewat HTTP di `internal/server/queue_test.go`, dan uji verifikasi mitra di `internal/server/kyc_test.go`) jalan bila `RACEGO_TEST_DATABASE_URL` diisi; `make test` mengisinya dengan `DATABASE_URL` (jadi butuh `make up`). Uji portal membuat lalu menghapus datanya sendiri (email `…@uji.test`):
 
 ```bash
 cd backend && RACEGO_TEST_DATABASE_URL=$DATABASE_URL go test ./...

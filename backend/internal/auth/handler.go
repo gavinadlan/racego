@@ -142,11 +142,13 @@ type Profile struct {
 	Email string       `json:"email"`
 	Phone *string      `json:"phone"`
 	Orgs  []Membership `json:"orgs"`
+	// Super admin platform (diberikan lewat perintah migrate superadmin, tidak ada endpoint web).
+	IsSuperAdmin bool `json:"is_super_admin"`
 }
 
 func (h *Handler) profile(ctx context.Context, userID uuid.UUID) (Profile, error) {
 	p := Profile{ID: userID}
-	if err := h.db.QueryRow(ctx, `SELECT name, email, phone FROM users WHERE id = $1`, userID).Scan(&p.Name, &p.Email, &p.Phone); err != nil {
+	if err := h.db.QueryRow(ctx, `SELECT name, email, phone, is_super_admin FROM users WHERE id = $1`, userID).Scan(&p.Name, &p.Email, &p.Phone, &p.IsSuperAdmin); err != nil {
 		return p, err
 	}
 	rows, err := h.db.Query(ctx, `

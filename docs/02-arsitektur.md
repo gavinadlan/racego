@@ -70,12 +70,38 @@ Opsional per event (`events.waiting_room`). Pembeli login masuk lobi `QUEUE_LOBB
 ## Portal mitra: penerbitan event & stok
 
 - **Status event**: `draft` → `published` → `closed`. Hanya `published`/`closed` dari mitra `verified` yang tampil publik; draft 404 di semua endpoint publik. `closed` tetap tampil (arsip & pemegang tiket) tetapi reservasi dan order ditolak.
-- **Verifikasi**: org baru `pending` (atau langsung `verified` bila `AUTO_VERIFY_ORGS=true`, default di development). `pending` boleh membuat draft tapi tidak boleh menerbitkan; `make verify ORG=slug` untuk memverifikasi.
+- **Verifikasi**: org baru `pending` (atau langsung `verified` bila `AUTO_VERIFY_ORGS=true`, default di development). `pending`/`rejected` boleh membuat draft tapi tidak boleh menerbitkan. Alur pengajuan & peninjauan: [Verifikasi mitra](#verifikasi-mitra-kyc). `make verify ORG=slug` tetap ada sebagai jalan pintas darurat/dev.
 - **Terbitkan** (`POST …/publish`): cek org terverifikasi, minimal 1 kategori, validasi ulang semua kolom, penjualan belum lewat; lalu status jadi `published` dan **stok semua kategori langsung dimuat ke Redis** (`checkout.SyncCategory`, SETNX) tanpa menunggu worker. Worker tetap menyinkronkan tiap 30 detik sebagai cadangan.
 - **Setelah ada penjualan** (order selain `cancelled`/`expired`): kode, harga, jarak, prefix BIB terkunci. Kuota boleh berubah selama tidak di bawah slot terpakai. Perubahan kuota menyesuaikan stok Redis dengan **selisih** lewat skrip Lua `adjust.lua` yang atomik (cek `stok + selisih >= 0`), bukan menimpa angka absolut, karena pembelian bisa sedang berjalan. Penyesuaian Redis dilakukan tepat sebelum commit; bila commit gagal, selisihnya dibatalkan.
 - **Hapus**: hanya draft / kategori tanpa order. Event berpenjualan hanya bisa **ditutup** (refund belum ada).
 - **Audit**: org dibuat/diubah, event dibuat/diubah/terbit/kembali ke draft/ditutup/dihapus, kategori dibuat/diubah/dihapus, anggota ditambah/diubah/dihapus → `audit_logs` (before/after JSON).
 - **Batas**: 3 org per akun pembuat (429 `too_many_orgs`), 20 draft per org (422 `too_many_drafts`).
+
+## Verifikasi mitra (KYC)
+
+Paket `internal/kyc` (+ `internal/secretbox`). Owner mengisi data di `/org/{slug}/verifikasi`, super admin meninjau di `/admin`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> draft: PUT pertama (attempt 1)
+  draft --> submitted: submit (lengkap + persetujuan)
+  submitted --> approved: super admin setujui
+  submitted --> rejected: super admin tolak (alasan)
+  rejected --> draft: ajukan ulang (attempt+1, salin isian & dokumen)
+  approved --> [*]
+```
+
+- **Model data** (migrasi `0006`): `users.is_super_admin`; `org_verifications` satu baris per pengajuan (`UNIQUE (org_id, attempt)` + indeks unik parsial: satu `draft|submitted` per org); `org_documents` (`UNIQUE (verification_id, kind)`, `storage_key`, nama asli tersanitasi, `content_type` hasil validasi, `size`, `sha256`). `organizations.kyc_status` tetap sumber kebenaran penguncian: `approved` → `verified`, `rejected` → `rejected`, selain itu `pending`. Approve/reject, update org, audit, dan antrean email terjadi dalam **satu transaksi**.
+- **Matriks dokumen** per jenis (`perorangan`, `komunitas`, `badan_usaha`) hanya ada di `kyc.Types`; frontend menerimanya lewat `requirements` di respons API.
+- **Enkripsi**: `secretbox` = AES-256-GCM, nonce acak per data, keluaran berawalan versi kunci `v1:` (biner untuk berkas, `v1:`+base64 untuk kolom). Yang dienkripsi: seluruh isi dokumen, NIK PIC, nomor rekening, nomor NPWP (`*_enc`); `*_last4` untuk tampilan tersamar. Kunci dari `KYC_ENC_KEY` (base64, 32 byte); kosong di development = kunci bawaan + peringatan log, di luar development API menolak start. Hanya service `api` yang memegang kunci. Kunci salah/data diubah → `ErrDecrypt` (GCM), API membalas 500 `decrypt_failed`, tidak pernah data ngawur. Kunci tidak ikut backup; lihat [10-deploy.md](10-deploy.md#6-backup-dan-restore).
+- **Penyimpanan privat**: `KYC_DIR` (default `backend/data/kyc`, volume `kyc` di produksi; API menolak start bila berada di dalam `UPLOAD_DIR`). Nama berkas = UUID acak + `.bin`. Tidak ada rute statis: berkas hanya lewat endpoint ber-otorisasi yang mendekripsi (≤ 5 MB di memori, karena GCM baru bisa memastikan keaslian setelah semua byte terbaca) lalu mengirim dengan `nosniff`, `Cache-Control: private, no-store`, `Content-Security-Policy: sandbox; default-src 'none'`. Caddy mengizinkan hanya rute dokumen dibingkai origin sendiri (`X-Frame-Options: SAMEORIGIN`; selain itu `DENY`) untuk pratinjau PDF. Pengajuan ulang menyalin baris dokumen (berkas sama); berkas fisik dihapus hanya bila tak ada baris lain yang merujuk.
+- **Validasi unggahan**: tipe dari isi (`http.DetectContentType`), JPEG/PNG di-decode & encode ulang lewat `upload.Reencode` (EXIF/GPS hilang), PDF disimpan apa adanya tanpa diproses: wajib `%PDF-` dan `%%EOF` di akhir, ditolak bila memuat `/Encrypt`, `/JavaScript`, `/JS`, `/Launch` (nama ber-escape `#xx` dinormalkan; isi stream terkompresi tidak diperiksa, pertahanannya CSP sandbox). SHA-256 isi disimpan untuk menandai berkas identik antar-org.
+- **Peninjauan**: hanya `submitted` yang bisa diputuskan; alasan tolak 10–1.000 karakter; super admin anggota org → 403 `conflict_of_interest`. Kecocokan nama pemilik rekening (huruf kecil, tanpa tanda baca/gelar umum) hanya petunjuk hijau/kuning.
+- **Akses tercatat** di `audit_logs` (`entity = org_verification`, `after` berisi `kind`/`field`/`by`/`ip`, tanpa nilai sensitif): `kyc.document.upload`, `kyc.document.view` (owner & super admin), `kyc.field.reveal`, `kyc.submitted`, `kyc.reopened`, `kyc.approved`, `kyc.rejected`.
+- **Email** lewat outbox topik `kyc.email` (satu pesan per owner, retry/backoff worker): diterima, disetujui, ditolak + alasan. Isinya hanya nama org, status, alasan.
+- **Super admin** hanya dari `cmd/migrate superadmin <email>`. `/v1/admin/*` dan halaman `/admin` membalas 404 untuk selain super admin.
+
+Ini ringkasan teknis, bukan nasihat hukum; kepatuhan terhadap peraturan perlindungan data belum ditinjau.
 
 ## Penyimpanan gambar
 
@@ -89,13 +115,14 @@ Satu server, satu `docker-compose.prod.yml` (proyek `racego-prod`). Caddy satu-s
 
 ```mermaid
 flowchart LR
-  B[Browser] -- "HTTPS :443 (atau via Cloudflare Tunnel)" --> C[caddy<br/>HSTS · gzip/zstd · body maks 4 MB]
+  B[Browser] -- "HTTPS :443 (atau via Cloudflare Tunnel)" --> C[caddy<br/>HSTS · gzip/zstd · body maks 6 MB]
   C -- "/v1/* · /uploads/* · /healthz" --> A[api]
   C -- selain itu --> W[web<br/>Next.js standalone]
   M[migrate<br/>sekali jalan, sukses dulu] --> P[(postgres<br/>vol pgdata)]
   A --> P
   A --> R[(redis appendonly<br/>vol redisdata)]
   A --- U[(vol uploads)]
+  A --- KY[(vol kyc<br/>terenkripsi)]
   K[worker] --> P & R
 ```
 
@@ -115,4 +142,4 @@ Rencana penguatan: Row-Level Security Postgres sebagai jaring pengaman kedua —
 
 ## Skema data
 
-Lihat `backend/migrations/0001_init.up.sql`. Tabel inti: `organizations`, `org_members`, `events`, `ticket_categories`, `orders`, `participants`, `tickets`, `payment_events`, `outbox`, `ledger_journals`, `ledger_entries`, `payouts`, `scan_logs`, `audit_logs`. Semua nominal uang disimpan sebagai `BIGINT` rupiah.
+Lihat `backend/migrations/0001_init.up.sql`. Tabel inti: `organizations`, `org_members`, `org_verifications`, `org_documents` (0006), `events`, `ticket_categories`, `orders`, `participants`, `tickets`, `payment_events`, `outbox`, `ledger_journals`, `ledger_entries`, `payouts`, `scan_logs`, `audit_logs`. Semua nominal uang disimpan sebagai `BIGINT` rupiah.

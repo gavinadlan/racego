@@ -23,7 +23,7 @@ Yang perlu kamu tahu:
 - **Satu pintu masuk.** Hanya Caddy yang membuka port (80/443). Postgres, Redis, api, worker, dan web hanya bisa saling bicara di jaringan internal Docker.
 - **Satu origin.** Browser memanggil API di alamat yang sama (`/v1/...`), jadi tidak ada urusan CORS atau cookie lintas domain. Image frontend di-build dengan `NEXT_PUBLIC_API_URL=""`, sehingga image yang sama bisa dipakai di alamat mana pun.
 - **Semua rahasia ada di `.env.prod`.** File ini di-ignore Git; contohnya ada di `.env.prod.example`.
-- **Perintahnya ada di Makefile** (`make help`): `prod-up`, `prod-down`, `prod-logs`, `prod-migrate`, `prod-seed`, `prod-grant`, `prod-verify`, `backup`, `restore`, `demo`, `demo-down`.
+- **Perintahnya ada di Makefile** (`make help`): `prod-up`, `prod-down`, `prod-logs`, `prod-migrate`, `prod-seed`, `prod-grant`, `prod-verify`, `prod-superadmin`, `backup`, `restore`, `demo`, `demo-down`.
 
 ## 1. Siapkan server
 
@@ -103,7 +103,8 @@ Buka `.env.prod` (`nano .env.prod`) dan isi:
 | `SITE_ADDRESS` | Alamat dari langkah 2, tanpa `https://` (mis. `racego-kamu.duckdns.org`) |
 | `SMTP_ADDR`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_FROM` | **Gmail:** `smtp.gmail.com:587`, alamat Gmail, dan [App Password](https://support.google.com/accounts/answer/185833) (bukan password akun; butuh verifikasi 2 langkah). **Resend:** `smtp.resend.com:587`, user `resend`, password = API key. Tanpa SMTP, kode masuk tidak terkirim. |
 | `MIDTRANS_SERVER_KEY`, `MIDTRANS_CLIENT_KEY` | Kunci **sandbox** dari [dashboard.sandbox.midtrans.com](https://dashboard.sandbox.midtrans.com) (*Settings → Access Keys*). Kosongkan keduanya untuk mode mock: tombol "Simulasikan bayar" muncul. `MIDTRANS_IS_PRODUCTION` tetap `false`. |
-| `AUTO_VERIFY_ORGS` | `false` (default aman): penyelenggara baru harus diverifikasi manual sebelum bisa menerbitkan event. Untuk demo boleh `true`. |
+| `AUTO_VERIFY_ORGS` | `false` (default aman): penyelenggara baru mengajukan verifikasi dan ditinjau super admin di `/admin` sebelum bisa menerbitkan event. Untuk demo boleh `true`. |
+| `KYC_ENC_KEY` | Diisi `gen-secrets.sh` (base64 32 byte) dan **tidak pernah ditimpanya**. Mengenkripsi dokumen verifikasi serta NIK/rekening/NPWP. **Kunci hilang atau berubah = semua data itu tidak bisa dibuka lagi, termasuk dari backup.** Simpan salinannya di pengelola password, terpisah dari backup. Kosong → api menolak start. |
 | `QUEUE_*` (opsional) | Antrian virtual untuk event yang mencentangnya: `QUEUE_LOBBY_MINUTES` (15), `QUEUE_ADMIT_PER_SEC` (20), `QUEUE_MAX_ACTIVE` (300), `QUEUE_PASS_TTL` (10m), `QUEUE_HEARTBEAT_TTL` (45s). Default cocok untuk server 2 CPU; arti tiap nilai di [03-war-tiket](03-war-tiket.md#parameter-env). |
 
 `FRONTEND_URL` tidak perlu diisi; nilainya otomatis `https://$SITE_ADDRESS`. Pengaturan produksi lain sudah dipasang di `docker-compose.prod.yml`: `APP_ENV=production`, dev login mati, dan `UPLOAD_DIR=/data/uploads` di volume.
@@ -125,10 +126,10 @@ Perintah ini membangun image, menjalankan migrasi (service `migrate` harus sukse
 
 ```bash
 make prod-grant EMAIL=kamu@gmail.com ORG=jakarta-runners ROLE=owner   # bila memakai data contoh
-make prod-verify ORG=slug-penyelenggara                               # izinkan menerbitkan event
+make prod-superadmin EMAIL=kamu@gmail.com                             # akses /admin untuk meninjau verifikasi
 ```
 
-Penyelenggara yang mendaftar sendiri lewat **Jadi penyelenggara** tetap berstatus *menunggu verifikasi* sampai kamu menjalankan `make prod-verify ORG=<slug>`. Slug terlihat di alamat dashboard `/org/<slug>`.
+Penyelenggara yang mendaftar sendiri lewat **Jadi penyelenggara** mengirim data dan dokumen dari tab **Verifikasi**, lalu kamu meninjaunya di `https://SITE_ADDRESS/admin` (menu akun → **Admin**): setujui, atau tolak dengan alasan (owner menerima email dan bisa mengajukan ulang). Super admin tidak bisa meninjau penyelenggara tempat dia sendiri anggota; minta super admin lain. `make prod-verify ORG=<slug>` masih ada sebagai jalan pintas (misalnya untuk data contoh) tanpa pengajuan.
 
 ## 4. Midtrans: Notification URL
 
@@ -166,7 +167,7 @@ Log container berotasi otomatis (`json-file`, 3 × 10 MB per service). Semua ser
 
 ## 6. Backup dan restore
 
-`make backup` menyimpan `pg_dump -Fc` dan arsip volume `uploads` ke `backups/racego-YYYYMMDD-HHMMSS/`. Hanya 7 backup terakhir yang disimpan (ubah dengan `KEEP=14 make backup`). Kode keluarnya bukan nol bila gagal, jadi aman dipanggil cron.
+`make backup` menyimpan `pg_dump -Fc`, arsip volume `uploads`, dan arsip volume `kyc` (dokumen verifikasi, sudah terenkripsi) ke `backups/racego-YYYYMMDD-HHMMSS/`. Hanya 7 backup terakhir yang disimpan (ubah dengan `KEEP=14 make backup`). Kode keluarnya bukan nol bila gagal, jadi aman dipanggil cron.
 
 **Terjadwal tiap malam pukul 02.30:** jalankan `crontab -e`, lalu tambahkan:
 
@@ -182,13 +183,15 @@ rsync -a racego@IP_SERVER:racego/backups/ ~/racego-backups/
 
 Simpan `.env.prod` terpisah dari backup (di pengelola password). Backup tanpa kunci QR yang sama membuat QR tiket lama tidak sah.
 
+**`KYC_ENC_KEY` sengaja tidak ikut backup.** Backup berisi data verifikasi yang terenkripsi; kalau kuncinya ikut tersimpan di folder yang sama, backup yang bocor bisa dibuka. Sebaliknya, backup tanpa kunci tidak berguna untuk data verifikasi. Jadi: salin `KYC_ENC_KEY` sekali ke pengelola password (atau brankas lain yang terpisah dari tempat backup disalin), dan pastikan setiap server baru memakai kunci yang sama.
+
 **Restore** ke stack yang sedang berjalan (juga di server baru setelah `make prod-up` dengan `.env.prod` yang sama):
 
 ```bash
 make restore FILE=backups/racego-20261028-023000
 ```
 
-Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worker, mengganti database dan unggahan, mengosongkan Redis (stok dimuat ulang dari database), lalu menyalakan api/worker lagi. Order *pending* yang sedang berjalan saat backup dibuat bisa tidak mengembalikan slotnya saat kedaluwarsa; jalankan restore saat tidak ada penjualan berlangsung.
+Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worker, mengganti database, unggahan, dan dokumen verifikasi (bila ada `kyc.tar.gz`; butuh `KYC_ENC_KEY` yang sama), mengosongkan Redis (stok dimuat ulang dari database), lalu menyalakan api/worker lagi. Order *pending* yang sedang berjalan saat backup dibuat bisa tidak mengembalikan slotnya saat kedaluwarsa; jalankan restore saat tidak ada penjualan berlangsung.
 
 ## 7. Checklist sebelum dibuka ke publik
 
@@ -196,6 +199,8 @@ Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worke
 - [ ] Menu **Akun contoh (dev)** tidak ada; `curl -H 'X-User-ID: 11111111-1111-1111-1111-111111111111' https://SITE_ADDRESS/v1/me` → 401.
 - [ ] `AUTO_VERIFY_ORGS=false` (kecuali memang demo).
 - [ ] `QR_PRIVATE_KEY` baru dari `gen-secrets.sh` (bukan kunci dev), dan salinannya tersimpan di luar server.
+- [ ] `KYC_ENC_KEY` terisi dari `gen-secrets.sh` dan salinannya tersimpan terpisah dari backup.
+- [ ] Akun super admin dibuat (`make prod-superadmin EMAIL=…`), dan hanya untuk orang yang memang meninjau mitra.
 - [ ] `QUEUE_SECRET` terisi (≥ 32 karakter, dari `gen-secrets.sh`); tanpa itu api dan worker menolak start.
 - [ ] Password Postgres/Redis acak dari `gen-secrets.sh`; `.env.prod` hanya bisa dibaca pemiliknya (`ls -l .env.prod` → `-rw-------`).
 - [ ] Hanya 22/80/443 terbuka: dari laptop, `nc -zv IP_SERVER 5432` dan `nc -zv IP_SERVER 6379` harus gagal.
