@@ -10,10 +10,12 @@ import (
 
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
+	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
 	"github.com/gavinadlan/racego/backend/internal/queue"
+	"github.com/gavinadlan/racego/backend/internal/secretbox"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
 	"github.com/gavinadlan/racego/backend/internal/worker"
 )
@@ -23,6 +25,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		slog.Error("konfigurasi tidak valid", "err", err)
+		os.Exit(1)
+	}
+	// Kunci yang sama dengan API: nomor rekening pencairan dibuka tepat sebelum dikirim ke gateway.
+	box, err := secretbox.FromEnv(cfg.KYCEncKey, cfg.IsDev())
+	if err != nil {
+		slog.Error("kunci KYC", "err", err)
+		os.Exit(1)
+	}
 
 	db, err := platform.NewDB(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -50,7 +62,8 @@ func main() {
 	inv := checkout.NewInventory(rdb)
 	w := worker.New(db, inv, signer,
 		notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom), cfg.FrontendURL).
-		WithQueue(queue.NewRunner(db, queue.New(rdb, inv, passSigner, cfg.Queue)))
+		WithQueue(queue.NewRunner(db, queue.New(rdb, inv, passSigner, cfg.Queue))).
+		WithFinance(finance.FromConfig(db, box, cfg))
 	if !cfg.MidtransMock() {
 		// Cadangan webhook: cek status order ke Midtrans tiap menit (wajib saat development di localhost).
 		w.WithReconciler(payment.NewReconciler(

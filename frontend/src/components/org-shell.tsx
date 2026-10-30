@@ -8,10 +8,10 @@ import { useApi } from "@/lib/use-api";
 import { useSession } from "./session";
 import { btnDark, ErrorBox, Loading, LoginHint, PageTitle } from "./ui";
 
-type Tab = "events" | "team" | "profile" | "verification";
+type Tab = "events" | "team" | "profile" | "verification" | "finance";
 
 /**
- * Kerangka dashboard mitra: judul, tab Event · Tim · Verifikasi · Profil, dan banner status verifikasi.
+ * Kerangka dashboard mitra: judul, tab Event · Keuangan · Tim · Verifikasi · Profil, dan banner status verifikasi.
  * Profil org dimuat sekali di sini lalu diteruskan ke isi tab.
  */
 export function OrgShell({ tab, children }: { tab: Tab; children: (profile: OrgProfile, reload: () => void) => React.ReactNode }) {
@@ -26,6 +26,7 @@ export function OrgShell({ tab, children }: { tab: Tab; children: (profile: OrgP
 
   const tabs: { id: Tab; href: string; label: string }[] = [
     { id: "events", href: `/org/${org}`, label: "Event" },
+    ...(data.role === "owner" || data.role === "finance" ? [{ id: "finance" as Tab, href: `/org/${org}/keuangan`, label: "Keuangan" }] : []),
     ...(data.role === "owner" ? [{ id: "team" as Tab, href: `/org/${org}/tim`, label: "Tim" }] : []),
     { id: "verification", href: `/org/${org}/verifikasi`, label: "Verifikasi" },
     { id: "profile", href: `/org/${org}/profil`, label: "Profil" },

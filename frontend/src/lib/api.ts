@@ -543,3 +543,158 @@ export const approveVerification = (id: string) => apiFetch<AdminVerification>(a
 export const rejectVerification = (id: string, reason: string) =>
   apiFetch<AdminVerification>(adminV(id, "/reject"), { method: "POST", body: { reason } });
 export const adminDocUrl = (id: string, kind: DocKind) => `${API_URL}${adminV(id, `/documents/${kind}`)}`;
+
+// ===== Keuangan mitra: saldo, pencairan, refund, laporan =====
+
+export type Balances = { held: number; available: number; in_process: number; paid_out: number };
+export type PayoutAccount = { bank_code: string; bank_name: string; account_holder: string; last4: string };
+export type Blocker = { code: string; message: string };
+
+export type FinanceSummary = {
+  balances: Balances;
+  account: PayoutAccount | null;
+  kyc_status: OrgProfile["kyc_status"];
+  rules: { payout_min: number; hold_days: number };
+  can_payout: boolean;
+  blocker: Blocker | null;
+  mock: boolean;
+};
+
+export type PayoutStatus = "requested" | "approved" | "processing" | "completed" | "failed" | "rejected";
+
+export type Payout = {
+  id: string;
+  org_name: string;
+  org_slug: string;
+  amount: number;
+  status: PayoutStatus;
+  account: PayoutAccount;
+  reference_no: string | null;
+  reject_reason: string | null;
+  fail_reason: string | null;
+  attempts: number;
+  requested_by_name: string;
+  approved_by_name: string | null;
+  created_at: string;
+  approved_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
+export type Paged<T> = { items: T[]; page: number; page_size: number; total?: number };
+
+export type Mutation = { id: number; at: string; kind: string; description: string; account: "tertahan" | "tersedia" | "dalam_proses"; amount: number; ref: string };
+
+export type RefundStatus = "requested" | "approved" | "processing" | "manual_required" | "completed" | "rejected" | "failed";
+
+export type Refund = {
+  id: string;
+  order_id: string;
+  org_name: string;
+  org_slug: string;
+  event_name: string;
+  buyer_email: string;
+  amount: number;
+  status: RefundStatus;
+  reason: string;
+  requested_by_name: string;
+  approved_by_name: string | null;
+  reference: string | null;
+  reject_reason: string | null;
+  fail_reason: string | null;
+  collected_tickets: number;
+  created_at: string;
+  approved_at: string | null;
+  completed_at: string | null;
+};
+
+export type OrgOrder = {
+  id: string;
+  event_id: string;
+  event_name: string;
+  category: string;
+  buyer_name: string;
+  buyer_email: string;
+  qty: number;
+  total: number;
+  status: "paid" | "refunded" | "needs_refund";
+  paid_at: string | null;
+  refund_status: RefundStatus | null;
+  collected_tickets: number;
+};
+
+export type EventSales = {
+  event_id: string;
+  event_name: string;
+  race_date: string;
+  orders_paid: number;
+  orders_refunded: number;
+  gross: number;
+  platform_fee: number;
+  pg_fee: number;
+  refunds: number;
+  net: number;
+};
+
+const orgF = (org: string, rest: string) => `/v1/org/${org}${rest}`;
+export const requestPayout = (org: string, amount: number, idempotencyKey: string) =>
+  apiFetch<Payout>(orgF(org, "/payouts"), { method: "POST", body: { amount }, headers: { "Idempotency-Key": idempotencyKey } });
+export const requestRefund = (org: string, orderId: string, reason: string) =>
+  apiFetch<Refund>(orgF(org, `/orders/${orderId}/refund`), { method: "POST", body: { reason } });
+
+/** Unduh berkas dari API (dengan sesi/header yang sama dengan apiFetch) lalu simpan lewat browser. */
+export async function downloadFile(path: string, fallbackName: string) {
+  const headers: Record<string, string> = {};
+  const userId = getDevUserId();
+  if (userId) headers["X-User-ID"] = userId;
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { headers, credentials: "include", cache: "no-store" });
+  } catch {
+    throw new ApiError(0, "network", "Tidak bisa terhubung ke server.");
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.error ?? "unknown", data.message ?? `Error ${res.status}`);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Super admin
+export type AdminPayout = Payout & { org_available: number };
+export type AdminPayoutList = Paged<AdminPayout> & { counts: Partial<Record<PayoutStatus, number>>; mock: boolean };
+export type AdminPayoutDetail = { payout: Payout; balances: Balances; history: Payout[]; org_kyc_status: string; conflict_of_interest: boolean; mock: boolean };
+export type AdminRefundList = Paged<Refund> & { counts: Partial<Record<RefundStatus, number>>; mock: boolean };
+export type LedgerCheck = { ok: boolean; checks: { name: string; ok: boolean; detail: string }[] };
+export type FinanceOverview = {
+  held: number;
+  available: number;
+  in_process: number;
+  platform_revenue: number;
+  refund_pg_cost: number;
+  cash: number;
+  accounts: Record<string, number>;
+  payouts: Partial<Record<PayoutStatus, number>>;
+  refunds: Partial<Record<RefundStatus, number>>;
+  disburse_mode: "mock" | "midtrans";
+  mock: boolean;
+  payout_min: number;
+  hold_days: number;
+};
+
+const adminP = (id: string, rest = "") => `/v1/admin/payouts/${id}${rest}`;
+export const revealPayoutAccount = (id: string) => apiFetch<{ value: string }>(adminP(id, "/reveal"), { method: "POST", body: {} });
+export const approvePayout = (id: string) => apiFetch<AdminPayoutDetail>(adminP(id, "/approve"), { method: "POST" });
+export const rejectPayout = (id: string, reason: string) => apiFetch<AdminPayoutDetail>(adminP(id, "/reject"), { method: "POST", body: { reason } });
+export const createRefund = (orderId: string, reason: string) =>
+  apiFetch<Refund>("/v1/admin/refunds", { method: "POST", body: { order_id: orderId, reason } });
+export const refundAction = (id: string, action: "approve" | "reject" | "mark-done", body?: { reason?: string; reference?: string }) =>
+  apiFetch<Refund>(`/v1/admin/refunds/${id}/${action}`, { method: "POST", body });

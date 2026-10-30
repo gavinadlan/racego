@@ -2,6 +2,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -32,6 +34,9 @@ type Config struct {
 	KYCEncKey string // base64 32 byte; kunci enkripsi dokumen & data sensitif verifikasi mitra
 	KYCDir    string // folder privat dokumen KYC terenkripsi (bukan di dalam UploadDir)
 
+	Finance FinanceConfig
+	errs    []error // nilai env tidak valid; dilaporkan Validate
+
 	SMTPAddr     string
 	SMTPUsername string // kosong untuk Mailpit; isi untuk Resend/penyedia SMTP lain
 	SMTPPassword string
@@ -48,12 +53,64 @@ type QueueConfig struct {
 	HeartbeatTTL time.Duration // tanpa polling selama ini = keluar antrian
 }
 
+// FinanceConfig mengatur saldo mitra, pencairan, dan refund. Lihat docs/04-pembayaran-dan-ledger.md.
+type FinanceConfig struct {
+	HoldDays        int           // PAYOUT_HOLD_DAYS: hari setelah hari lomba sebelum dana dirilis
+	PayoutMin       int64         // PAYOUT_MIN: jumlah pencairan minimum (rupiah)
+	DisburseMode    string        // DISBURSE_MODE: mock | midtrans
+	MockDelay       time.Duration // DISBURSE_MOCK_DELAY: jeda mock processing → completed
+	IrisBaseURL     string
+	IrisCreatorKey  string
+	IrisApproverKey string
+}
+
+const (
+	DisburseMock     = "mock"
+	DisburseMidtrans = "midtrans"
+)
+
 // MockServerKey dipakai untuk menandatangani notifikasi palsu di mode mock.
 const MockServerKey = "mock-server-key"
 
 func Load() Config {
 	env := get("APP_ENV", "development")
+	var errs []error
+	strictInt := func(key string, def, min int64) int64 {
+		raw := os.Getenv(key)
+		if raw == "" {
+			return def
+		}
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v < min {
+			errs = append(errs, fmt.Errorf("%s=%q tidak valid: harus bilangan bulat ≥ %d", key, raw, min))
+			return def
+		}
+		return v
+	}
+	mockDelay := 5 * time.Second
+	if raw := os.Getenv("DISBURSE_MOCK_DELAY"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			errs = append(errs, fmt.Errorf("DISBURSE_MOCK_DELAY=%q tidak valid: pakai durasi seperti 5s atau 1m", raw))
+		} else {
+			mockDelay = d
+		}
+	}
+	mode := get("DISBURSE_MODE", DisburseMock)
+	if mode != DisburseMock && mode != DisburseMidtrans {
+		errs = append(errs, fmt.Errorf("DISBURSE_MODE=%q tidak valid: pilih mock atau midtrans", mode))
+	}
 	return Config{
+		errs: errs,
+		Finance: FinanceConfig{
+			HoldDays:        int(strictInt("PAYOUT_HOLD_DAYS", 3, 0)),
+			PayoutMin:       strictInt("PAYOUT_MIN", 50000, 1),
+			DisburseMode:    mode,
+			MockDelay:       mockDelay,
+			IrisBaseURL:     get("IRIS_BASE_URL", "https://app.sandbox.midtrans.com/iris/api/v1"),
+			IrisCreatorKey:  os.Getenv("IRIS_CREATOR_KEY"),
+			IrisApproverKey: os.Getenv("IRIS_APPROVER_KEY"),
+		},
 		Env:                  env,
 		HTTPAddr:             get("HTTP_ADDR", ":8080"),
 		FrontendURL:          get("FRONTEND_URL", "http://localhost:3000"),
@@ -83,6 +140,24 @@ func Load() Config {
 		MailFrom:       get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
 	}
 }
+
+// Validate menolak konfigurasi keuangan yang tidak valid; API dan worker tidak start bila gagal.
+// Pesan tidak pernah memuat nilai kunci.
+func (c Config) Validate() error {
+	errs := append([]error{}, c.errs...)
+	if c.Finance.DisburseMode == DisburseMidtrans {
+		if c.Finance.IrisCreatorKey == "" || c.Finance.IrisApproverKey == "" {
+			errs = append(errs, errors.New("DISBURSE_MODE=midtrans butuh IRIS_CREATOR_KEY dan IRIS_APPROVER_KEY (kunci Midtrans Payouts/Iris); kosongkan DISBURSE_MODE untuk mode mock"))
+		}
+		if c.MidtransMock() {
+			errs = append(errs, errors.New("DISBURSE_MODE=midtrans butuh MIDTRANS_SERVER_KEY untuk refund lewat Core API"))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// DisburseMock true bila pencairan & refund hanya disimulasikan (tidak ada uang sungguhan yang dikirim).
+func (c Config) DisburseMock() bool { return c.Finance.DisburseMode != DisburseMidtrans }
 
 func (c Config) IsDev() bool { return c.Env == "development" }
 

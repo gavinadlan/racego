@@ -5,7 +5,7 @@ SHELL := /bin/bash
 export
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs migrate seed db-reset grant verify superadmin keygen api worker web dev test test-backend lint-web build loadtest queue-demo queue-load \
+.PHONY: help setup up down logs migrate seed db-reset grant verify superadmin dev-release keygen api worker web dev test test-backend lint-web build loadtest queue-demo queue-load \
 	prod-build prod-up prod-down prod-logs prod-migrate prod-seed prod-grant prod-verify prod-superadmin backup restore demo demo-down
 
 help: ## Tampilkan daftar perintah
@@ -42,6 +42,9 @@ verify: ## Verifikasi mitra tanpa alur pengajuan (darurat/dev): make verify ORG=
 
 superadmin: ## Jadikan akun super admin (/admin): make superadmin EMAIL=kamu@x.com (sudah pernah login)
 	cd backend && go run ./cmd/migrate superadmin "$(EMAIL)"
+
+dev-release: ## DEV: rilis semua saldo tertahan mitra tanpa masa tahan: make dev-release ORG=slug
+	cd backend && go run ./cmd/migrate release "$(ORG)"
 
 keygen: ## Buat kunci Ed25519 untuk QR tiket (tempel ke QR_PRIVATE_KEY)
 	cd backend && go run ./cmd/keygen

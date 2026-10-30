@@ -36,12 +36,13 @@ flowchart TB
 | `ratelimit` | Pembatas INCR + EXPIRE di Redis, dipakai OTP dan antrian |
 | `payment` | Snap client (HTTP & mock), verifikasi & pemrosesan webhook Midtrans |
 | `ticket` | Tanda tangan QR Ed25519, penerbitan tiket + BIB, scan race pack |
-| `ledger` | Jurnal double-entry, fee platform, estimasi biaya PG |
+| `ledger` | Jurnal double-entry (append-only, dijaga trigger DB), fee platform, estimasi biaya PG, saldo mitra dari entri, pemeriksaan integritas |
+| `finance` | Keuangan mitra: rilis saldo setelah masa tahan, pencairan maker-checker lewat `Disburser` (mock / Midtrans Payouts Iris), refund per order lewat `Refunder` (mock / Core API), laporan & CSV. Bergantung pada `ledger`, `notify`, `secretbox`; dipakai `server` dan `worker` |
 | `tenant` | Middleware multi-tenant: slug mitra → `org_id` + cek peran |
 | `event` | Katalog publik (hanya event terbit dari mitra terverifikasi), ringkasan penjualan mitra |
 | `partner` | Portal mitra: daftar penyelenggara, profil, CRUD event & kategori, terbitkan/tutup, anggota tim, audit |
 | `upload` | Validasi & simpan gambar (poster, logo) di balik antarmuka `Storage` (sekarang disk lokal) |
-| `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order), dan pemanggilan antrian tiap detik di goroutine terpisah |
+| `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order, rilis saldo tiap jam, eksekusi & cek status pencairan/refund tiap 15 detik), dan pemanggilan antrian tiap detik di goroutine terpisah |
 | `auth` | Login email + OTP, sesi cookie, profil `/me`, middleware identitas & CSRF |
 | `notify` | Email tiket & kode masuk (SMTP, batas waktu 10 detik) |
 
@@ -103,6 +104,15 @@ stateDiagram-v2
 
 Ini ringkasan teknis, bukan nasihat hukum; kepatuhan terhadap peraturan perlindungan data belum ditinjau.
 
+## Keuangan mitra
+
+Rincian & tabel jurnal: [04 · Pembayaran, ledger, dan pencairan](04-pembayaran-dan-ledger.md).
+
+- Setiap perubahan uang = satu jurnal di transaksi yang sama dengan perubahan status; `(ref_type, ref_id)` deterministik → idempotent. Saldo dihitung dari `ledger_entries`, tidak ada kolom saldo.
+- Pengajuan pencairan mengunci baris org (`SELECT … FOR UPDATE`), plus indeks unik "satu pencairan aktif per org". Persetujuan mengunci baris payout; klik ganda → 409 `invalid_state`.
+- Gateway hanya dipanggil worker, **di luar** transaksi: klaim baris (sewa 2 menit) → panggil → catat hasil di transaksi baru. Kunci idempoten ke gateway = id payout/refund, jadi pengulangan setelah crash aman.
+- Rekening pencairan disalin (ciphertext) dari pengajuan verifikasi yang disetujui; nomor lengkap hanya dibuka worker tepat sebelum dikirim ke gateway dan saat super admin menekan "Tampilkan" (tercatat). Karena itu worker juga memegang `KYC_ENC_KEY`.
+
 ## Penyimpanan gambar
 
 - `POST /v1/org/{org}/uploads` (owner/admin) menerima JPEG/PNG maks 3 MB, sisi terpanjang maks 4.000 px. Tipe ditentukan dari **isi file** (`http.DetectContentType` + `image.DecodeConfig`/`Decode`), lalu gambar di-**encode ulang** sehingga EXIF/GPS hilang.
@@ -142,4 +152,4 @@ Rencana penguatan: Row-Level Security Postgres sebagai jaring pengaman kedua —
 
 ## Skema data
 
-Lihat `backend/migrations/0001_init.up.sql`. Tabel inti: `organizations`, `org_members`, `org_verifications`, `org_documents` (0006), `events`, `ticket_categories`, `orders`, `participants`, `tickets`, `payment_events`, `outbox`, `ledger_journals`, `ledger_entries`, `payouts`, `scan_logs`, `audit_logs`. Semua nominal uang disimpan sebagai `BIGINT` rupiah.
+Lihat `backend/migrations/0001_init.up.sql`. Tabel inti: `organizations`, `org_members`, `org_verifications`, `org_documents` (0006), `events`, `ticket_categories`, `orders`, `participants`, `tickets`, `payment_events`, `outbox`, `ledger_journals`, `ledger_entries`, `payout_accounts`, `payouts`, `refunds` (0007), `scan_logs`, `audit_logs`. Semua nominal uang disimpan sebagai `BIGINT` rupiah.

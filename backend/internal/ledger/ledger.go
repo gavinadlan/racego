@@ -19,6 +19,7 @@ const (
 	AccPlatformRevenue  = "pendapatan_platform"  // fee platform
 	AccPayoutInProgress = "payout_dalam_proses"
 	AccRefundPayable    = "refund_terutang"
+	AccRefundPGExpense  = "beban_refund_pg" // biaya PG yang tidak kembali saat refund (ditanggung platform)
 )
 
 type Entry struct {

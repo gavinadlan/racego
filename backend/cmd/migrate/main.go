@@ -6,6 +6,7 @@
 //	go run ./cmd/migrate grant <email> <org-slug> <role>  # jadikan akun anggota mitra
 //	go run ./cmd/migrate verify <org-slug>                # verifikasi mitra (boleh menerbitkan event)
 //	go run ./cmd/migrate superadmin <email>               # jadikan akun super admin platform (/admin)
+//	go run ./cmd/migrate release <org-slug>               # DEV: rilis semua saldo tertahan org tanpa menunggu masa tahan
 package main
 
 import (
@@ -18,10 +19,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gavinadlan/racego/backend/internal/config"
+	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/platform"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/migrations"
@@ -29,7 +32,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>|verify <org-slug>|superadmin <email>")
+		log.Fatal("pemakaian: migrate up|seed|reset|grant <email> <org-slug> <role>|verify <org-slug>|superadmin <email>|release <org-slug>")
 	}
 	ctx := context.Background()
 	cfg := config.Load()
@@ -67,6 +70,11 @@ func main() {
 			log.Fatal("pemakaian: migrate superadmin <email>")
 		}
 		err = superAdmin(ctx, db, os.Args[2])
+	case "release":
+		if len(os.Args) != 3 {
+			log.Fatal("pemakaian: migrate release <org-slug>")
+		}
+		err = release(ctx, db, cfg, os.Args[2])
 	default:
 		err = fmt.Errorf("perintah tidak dikenal: %s", os.Args[1])
 	}
@@ -232,5 +240,36 @@ func superAdmin(ctx context.Context, db *pgxpool.Pool, email string) error {
 		return err
 	}
 	fmt.Printf("✓ %s (%s) sekarang super admin; buka /admin setelah masuk\n", name, email)
+	return nil
+}
+
+// release (HANYA development) merilis semua saldo tertahan org tanpa menunggu masa tahan, lewat
+// fungsi yang sama dengan worker (jurnal balance.release per order, idempotent). Tidak ada endpoint web.
+func release(ctx context.Context, db *pgxpool.Pool, cfg config.Config, slug string) error {
+	if err := DevOnly(cfg.Env); err != nil {
+		return err
+	}
+	var orgID uuid.UUID
+	var name string
+	err := db.QueryRow(ctx, `SELECT id, name FROM organizations WHERE slug = $1`, slug).Scan(&orgID, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("mitra dengan slug %q tidak ditemukan", slug)
+	}
+	if err != nil {
+		return err
+	}
+	n, amount, err := finance.NewService(db, nil, cfg.Finance, nil, nil).Release(ctx, &orgID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s: %d order dirilis, Rp%d pindah ke saldo tersedia\n", name, n, amount)
+	return nil
+}
+
+// DevOnly menolak perintah khusus development di lingkungan lain.
+func DevOnly(env string) error {
+	if env != "development" {
+		return fmt.Errorf("perintah ini hanya untuk APP_ENV=development (sekarang %q)", env)
+	}
 	return nil
 }

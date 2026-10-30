@@ -36,7 +36,8 @@ make dev        # API :8080, worker, web :3000
 | Lihat stok di Redis | `docker compose exec redis redis-cli get '{cat:cccccccc-0000-0000-0000-000000000021}:stock'` |
 | Beri peran mitra ke akunmu | `make grant EMAIL=… ORG=jakarta-runners ROLE=owner` |
 | Jadikan akunmu super admin (halaman `/admin`) | `make superadmin EMAIL=…` (sudah pernah login) |
-| Verifikasi penyelenggara tanpa alur pengajuan (jalan pintas) | `make verify ORG=slug` |
+| Verifikasi penyelenggara tanpa alur pengajuan (jalan pintas) | `make verify ORG=slug` (catatan: org ini tidak punya rekening pencairan) |
+| Rilis saldo tertahan tanpa menunggu masa tahan | `make dev-release ORG=slug` (hanya `APP_ENV=development`) |
 | Lihat dokumen verifikasi (terenkripsi) | folder `backend/data/kyc/` (`KYC_DIR`, tidak di-commit; isinya ciphertext) |
 | Lihat gambar unggahan | folder `backend/data/uploads/` (`UPLOAD_DIR`, tidak di-commit) |
 | Data contoh terasa basi | `make db-reset` — tanggal seed relatif terhadap hari ini |
@@ -68,6 +69,19 @@ Tes yang butuh Postgres (`SessionStore`, reconciler, uji portal mitra di `intern
 cd backend && RACEGO_TEST_DATABASE_URL=$DATABASE_URL go test ./...
 cd backend && go test -race -run TestConcurrentJoinAdmitReserve ./internal/queue/   # 5.000 join + pemanggilan + reservasi paralel
 ```
+
+## Mencoba keuangan mitra (pencairan & refund, mode mock)
+
+Default `DISBURSE_MODE=mock`: tidak ada panggilan ke Midtrans Payouts dan tidak ada uang sungguhan. Tanpa mengubah `.env`, override di baris perintah, mis. `make api AUTO_VERIFY_ORGS=false` + `make worker`:
+
+1. Mitra mengikuti alur verifikasi sampai disetujui super admin (persetujuan membuat rekening pencairan terenkripsi). Org yang di-`make verify` tidak punya rekening.
+2. Pelari membeli tiket (tombol *Simulasikan bayar berhasil*). Tab **Keuangan** (`/org/{slug}/keuangan`, owner & finance) menampilkan saldo **Tertahan**.
+3. `make dev-release ORG=slug` → saldo pindah ke **Tersedia** tanpa menunggu 3 hari setelah lomba.
+4. Ajukan pencairan → super admin buka `/admin/pencairan` → Setujui. Worker (tiap 15 detik) mengirim ke Disburser mock: `processing` lalu `completed` setelah `DISBURSE_MOCK_DELAY`.
+5. Uji gagal: rekening berakhiran **`0000`** selalu gagal di mode mock (saldo kembali). Uji refund manual: alasan refund memuat kata **"manual"** → status *Perlu kirim manual* → `/admin/refund` → **Tandai sudah dikembalikan**.
+6. `/admin/keuangan` menampilkan ringkasan platform dan pemeriksaan integritas ledger.
+
+Tes keuangan: `internal/ledger/*_test.go` (angka jurnal), `internal/finance/gateway_test.go` (klien Iris & refund Midtrans dengan server HTTP palsu), `internal/server/finance_test.go` (alur lengkap lewat router + Postgres: peran, konkurensi, refund, laporan, integritas, trigger). Ledger append-only, jadi pembersih data tes menghapus jurnalnya dengan `session_replication_role = replica` (butuh user DB superuser, seperti `racego` di Docker).
 
 ## Menjalankan versi produksi
 

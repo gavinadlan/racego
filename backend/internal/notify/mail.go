@@ -156,3 +156,67 @@ func VerificationEmail(orgName, event, reason, pageURL string) (string, string) 
 		msg, html.EscapeString(pageURL))
 	return subject, body
 }
+
+// PayoutEmail: status pencairan untuk owner/finance. event = requested | approved | rejected | completed | failed.
+// Hanya nama org, jumlah, status, alasan, dan 4 digit akhir rekening (tanpa nomor lengkap).
+func PayoutEmail(orgName, event, amount, reason, last4, pageURL string) (string, string) {
+	org := html.EscapeString(orgName)
+	labels := map[string]string{
+		"requested": "diajukan dan menunggu persetujuan tim RaceGo",
+		"approved":  "disetujui dan sedang diproses",
+		"rejected":  "ditolak; saldo dikembalikan ke saldo tersedia",
+		"completed": "selesai ditransfer",
+		"failed":    "gagal ditransfer; saldo dikembalikan ke saldo tersedia",
+	}
+	subject := "Pencairan " + amount + " " + orgName + ": " + map[string]string{
+		"requested": "diajukan", "approved": "disetujui", "rejected": "ditolak", "completed": "selesai", "failed": "gagal"}[event]
+	msg := fmt.Sprintf(`<p>Pencairan dana <b>%s</b> untuk <b>%s</b> ke rekening ••••%s %s.</p>`,
+		html.EscapeString(amount), org, html.EscapeString(last4), labels[event])
+	if reason != "" {
+		msg += fmt.Sprintf(`<p>Alasan:</p><blockquote style="margin:12px 0;padding:10px 14px;border-left:4px solid #ff5a1f;background:#fff4ef">%s</blockquote>`,
+			strings.ReplaceAll(html.EscapeString(reason), "\n", "<br>"))
+	}
+	return subject, financeBody("Pencairan dana", msg, pageURL, "Buka halaman keuangan")
+}
+
+// RefundEmail: status refund. audience "buyer" (pembeli) atau "org" (owner/finance).
+// event = requested | approved | rejected | manual_required | completed | failed. Tanpa data sensitif.
+func RefundEmail(audience, eventName, orderShort, amount, event, reason, pageURL string) (string, string) {
+	ev := html.EscapeString(eventName)
+	var subject, msg string
+	if audience == "buyer" {
+		switch event {
+		case "approved":
+			subject = "Refund " + eventName + " disetujui"
+			msg = fmt.Sprintf(`<p>Refund order #%s untuk <b>%s</b> sebesar <b>%s</b> disetujui. Tiket order ini tidak berlaku lagi. Dana sedang dikembalikan.</p>`,
+				html.EscapeString(orderShort), ev, html.EscapeString(amount))
+		case "completed":
+			subject = "Refund " + eventName + " selesai"
+			msg = fmt.Sprintf(`<p>Dana refund order #%s untuk <b>%s</b> sebesar <b>%s</b> sudah dikembalikan.</p>`,
+				html.EscapeString(orderShort), ev, html.EscapeString(amount))
+		default:
+			subject = "Refund " + eventName + " tidak disetujui"
+			msg = fmt.Sprintf(`<p>Pengajuan refund order #%s untuk <b>%s</b> tidak disetujui. Tiketmu tetap berlaku.</p>`,
+				html.EscapeString(orderShort), ev)
+		}
+	} else {
+		labels := map[string]string{"requested": "diajukan", "approved": "disetujui", "rejected": "ditolak",
+			"manual_required": "perlu dikirim manual oleh tim RaceGo", "completed": "selesai", "failed": "gagal dikirim otomatis"}
+		subject = "Refund order #" + orderShort + " " + labels[event]
+		msg = fmt.Sprintf(`<p>Refund order #%s (<b>%s</b>) sebesar <b>%s</b> %s.</p>`,
+			html.EscapeString(orderShort), ev, html.EscapeString(amount), labels[event])
+	}
+	if reason != "" && event == "rejected" {
+		msg += fmt.Sprintf(`<p>Alasan:</p><blockquote style="margin:12px 0;padding:10px 14px;border-left:4px solid #ff5a1f;background:#fff4ef">%s</blockquote>`,
+			strings.ReplaceAll(html.EscapeString(reason), "\n", "<br>"))
+	}
+	return subject, financeBody("Refund", msg, pageURL, "Buka RaceGo")
+}
+
+func financeBody(title, msg, pageURL, cta string) string {
+	return fmt.Sprintf(`<div style="font-family:system-ui,sans-serif;max-width:560px">
+<h2>%s</h2>
+%s
+<p><a href="%s" style="display:inline-block;margin-top:16px;padding:10px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">%s</a></p></div>`,
+		title, msg, html.EscapeString(pageURL), cta)
+}

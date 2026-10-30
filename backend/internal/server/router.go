@@ -14,6 +14,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/event"
+	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/kyc"
 	"github.com/gavinadlan/racego/backend/internal/notify"
@@ -36,6 +37,8 @@ type Deps struct {
 	Mailer *notify.Mailer
 	Queue  *queue.Queue
 	KYCBox *secretbox.Box // kunci enkripsi dokumen & data sensitif verifikasi mitra
+	// Finance: keuangan mitra (pencairan, refund, laporan). nil = dibuat dari Cfg (DISBURSE_MODE).
+	Finance *finance.Service
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -55,6 +58,10 @@ func NewRouter(d Deps) http.Handler {
 	portal := partner.NewHandler(d.DB, d.Inv, d.Cfg.AutoVerifyOrgs)
 	uploads := upload.NewHandler(upload.Disk{Dir: d.Cfg.UploadDir})
 	verif := kyc.NewHandler(d.DB, d.Redis, d.KYCBox, d.Cfg.KYCDir, d.Cfg.AutoVerifyOrgs)
+	fin := d.Finance
+	if fin == nil {
+		fin = finance.FromConfig(d.DB, d.KYCBox, d.Cfg)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, realIP(d.Cfg.TrustedProxyHops), middleware.Recoverer)
@@ -135,6 +142,20 @@ func NewRouter(d Deps) http.Handler {
 				r.Patch("/events/{eventID}/categories/{categoryID}", portal.UpdateCategory)
 				r.Delete("/events/{eventID}/categories/{categoryID}", portal.DeleteCategory)
 			})
+			// Keuangan: hanya owner & finance (admin dan rpc_staff ditolak).
+			r.Group(func(r chi.Router) {
+				r.Use(tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleFinance))
+				r.Get("/finance/summary", fin.Summary)
+				r.Get("/finance/ledger", fin.Ledger)
+				r.Get("/payouts", fin.OrgPayouts)
+				r.Post("/payouts", fin.RequestPayout)
+				r.Get("/orders", fin.OrgOrders)
+				r.Post("/orders/{id}/refund", fin.RequestRefund)
+				r.Get("/refunds", fin.OrgRefunds)
+				r.Get("/reports/sales", fin.SalesSummary)
+				r.Get("/reports/sales.csv", fin.SalesCSV)
+				r.Get("/reports/ledger.csv", fin.LedgerCSV)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(ownerOnly)
 				r.Delete("/events/{eventID}", portal.DeleteEvent)
@@ -161,6 +182,18 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/verifications/{id}/documents/{kind}", verif.AdminDocument)
 			r.Post("/verifications/{id}/approve", verif.AdminApprove)
 			r.Post("/verifications/{id}/reject", verif.AdminReject)
+			r.Get("/payouts", fin.AdminPayouts)
+			r.Get("/payouts/{id}", fin.AdminPayout)
+			r.Post("/payouts/{id}/reveal", fin.AdminRevealAccount)
+			r.Post("/payouts/{id}/approve", fin.AdminApprovePayout)
+			r.Post("/payouts/{id}/reject", fin.AdminRejectPayout)
+			r.Get("/refunds", fin.AdminRefunds)
+			r.Post("/refunds", fin.AdminCreateRefund)
+			r.Post("/refunds/{id}/approve", fin.AdminApproveRefund)
+			r.Post("/refunds/{id}/reject", fin.AdminRejectRefund)
+			r.Post("/refunds/{id}/mark-done", fin.AdminMarkRefundDone)
+			r.Get("/finance/overview", fin.AdminOverview)
+			r.Get("/ledger/check", fin.AdminLedgerCheck)
 		})
 
 		// Simulasi pembayaran tanpa Midtrans: development, atau mode mock (MIDTRANS_SERVER_KEY kosong,

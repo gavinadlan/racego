@@ -23,10 +23,35 @@ import { ConfirmDialog } from "./ui-client";
 import { DocPreview, VerificationBadge } from "./verification";
 
 /** Halaman admin: selain super admin melihat 404 yang sama dengan alamat yang tidak ada. */
-function useSuperAdmin() {
+export function useSuperAdmin() {
   const { ready, me } = useSession();
   if (ready && !me?.is_super_admin) notFound();
   return ready;
+}
+
+const NAV = [
+  { href: "/admin", label: "Verifikasi" },
+  { href: "/admin/pencairan", label: "Pencairan" },
+  { href: "/admin/refund", label: "Refund" },
+  { href: "/admin/keuangan", label: "Keuangan" },
+] as const;
+
+/** Menu area admin. */
+export function AdminNav({ current }: { current: (typeof NAV)[number]["href"] }) {
+  return (
+    <nav aria-label="Menu admin" className="mb-6 flex flex-wrap gap-2">
+      {NAV.map((n) => (
+        <Link
+          key={n.href}
+          href={n.href}
+          aria-current={n.href === current ? "page" : undefined}
+          className={`rounded-full px-3.5 py-1.5 text-sm font-semibold ${n.href === current ? "bg-asphalt text-white" : "bg-card text-muted ring-1 ring-line hover:text-asphalt"}`}
+        >
+          {n.label}
+        </Link>
+      ))}
+    </nav>
+  );
 }
 
 const TABS = [
@@ -55,6 +80,7 @@ export function AdminQueue() {
       <PageTitle title="Verifikasi mitra">
         <p className="mt-2 text-sm text-muted">Tinjau data, dokumen, dan rekening penyelenggara sebelum mereka bisa menerbitkan event. Setiap akses dokumen dan data lengkap tercatat.</p>
       </PageTitle>
+      <AdminNav current="/admin" />
       <nav aria-label="Status pengajuan" className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
         {TABS.map((t) => (
           <Link

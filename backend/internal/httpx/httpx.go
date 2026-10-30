@@ -2,6 +2,7 @@
 package httpx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -27,7 +28,11 @@ func Error(w http.ResponseWriter, status int, code, message string) {
 }
 
 // Internal mencatat error asli ke log dan mengembalikan pesan umum ke klien.
+// Klien yang membatalkan request (pindah halaman) bukan error server: tidak dicatat.
 func Internal(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
+		return
+	}
 	slog.ErrorContext(r.Context(), "internal error", "path", r.URL.Path, "err", err)
 	Error(w, http.StatusInternalServerError, "internal", "Terjadi kesalahan pada server")
 }

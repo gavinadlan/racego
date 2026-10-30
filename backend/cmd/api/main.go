@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -36,6 +37,9 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("konfigurasi tidak valid: %w", err)
+	}
 	// Kunci KYC dicek sebelum apa pun: di luar development tanpa kunci, API tidak boleh start.
 	kycBox, err := secretbox.FromEnv(cfg.KYCEncKey, cfg.IsDev())
 	if err != nil {

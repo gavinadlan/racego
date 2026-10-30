@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gavinadlan/racego/backend/internal/checkout"
+	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/ledger"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
@@ -37,6 +38,13 @@ type Worker struct {
 	frontendURL string
 	reconciler  *payment.Reconciler // nil di mode mock
 	queue       *queue.Runner
+	finance     *finance.Service
+}
+
+// WithFinance mengaktifkan rilis saldo (tiap jam) serta eksekusi & cek status pencairan/refund.
+func (w *Worker) WithFinance(f *finance.Service) *Worker {
+	w.finance = f
+	return w
 }
 
 // WithQueue mengaktifkan pemanggilan antrian virtual tiap detik.
@@ -61,6 +69,10 @@ func (w *Worker) Run(ctx context.Context) {
 	holds := time.NewTicker(15 * time.Second)
 	sync := time.NewTicker(30 * time.Second)
 	reconcile := time.NewTicker(time.Minute)
+	money := time.NewTicker(15 * time.Second)
+	release := time.NewTicker(time.Hour)
+	defer money.Stop()
+	defer release.Stop()
 	defer outbox.Stop()
 	defer holds.Stop()
 	defer sync.Stop()
@@ -70,6 +82,8 @@ func (w *Worker) Run(ctx context.Context) {
 	go w.runQueues(ctx)
 	w.syncStock(ctx)
 	w.reconcilePayments(ctx)
+	w.releaseBalances(ctx)
+	w.runFinance(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -83,6 +97,10 @@ func (w *Worker) Run(ctx context.Context) {
 			w.releaseExpiredHolds(ctx)
 		case <-sync.C:
 			w.syncStock(ctx)
+		case <-money.C:
+			w.runFinance(ctx)
+		case <-release.C:
+			w.releaseBalances(ctx)
 		}
 	}
 }
@@ -162,6 +180,10 @@ func (w *Worker) handle(ctx context.Context, tx pgx.Tx, m message) error {
 		return w.onTicketEmail(ctx, tx, p.OrderID)
 	case "kyc.email":
 		return w.onVerificationEmail(ctx, tx, m.Payload)
+	case "payout.email":
+		return w.sendMail(finance.PayoutMail(ctx, tx, m.Payload, w.frontendURL))
+	case "refund.email":
+		return w.sendMail(finance.RefundMail(ctx, tx, m.Payload, w.frontendURL))
 	default:
 		slog.WarnContext(ctx, "topic outbox tidak dikenal", "topic", m.Topic)
 		return nil
@@ -287,6 +309,13 @@ func (w *Worker) onVerificationEmail(ctx context.Context, tx pgx.Tx, payload jso
 	return w.mailer.Send(email, subject, body)
 }
 
+func (w *Worker) sendMail(m finance.Mail, ok bool, err error) error {
+	if err != nil || !ok {
+		return err
+	}
+	return w.mailer.Send(m.To, m.Subject, m.Body)
+}
+
 func deref(s *string) string {
 	if s == nil {
 		return ""
@@ -295,6 +324,36 @@ func deref(s *string) string {
 }
 
 // ===== Job berkala =====
+
+// releaseBalances: saldo tertahan → tersedia untuk order yang masa tahannya lewat (idempotent).
+func (w *Worker) releaseBalances(ctx context.Context) {
+	if w.finance == nil {
+		return
+	}
+	n, amount, err := w.finance.Release(ctx, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "rilis saldo", "err", err)
+	} else if n > 0 {
+		slog.InfoContext(ctx, "saldo mitra dirilis", "order", n, "jumlah", amount)
+	}
+}
+
+// runFinance: eksekusi pencairan approved, cek status yang processing, eksekusi refund approved.
+// Panggilan gateway terjadi di luar transaksi; kegagalan dicatat dan diulang di putaran berikutnya.
+func (w *Worker) runFinance(ctx context.Context) {
+	if w.finance == nil {
+		return
+	}
+	if err := w.finance.ExecutePayouts(ctx); err != nil {
+		slog.ErrorContext(ctx, "eksekusi pencairan", "err", err)
+	}
+	if err := w.finance.CheckPayouts(ctx); err != nil {
+		slog.ErrorContext(ctx, "cek status pencairan", "err", err)
+	}
+	if err := w.finance.ExecuteRefunds(ctx); err != nil {
+		slog.ErrorContext(ctx, "eksekusi refund", "err", err)
+	}
+}
 
 // runQueues memanggil peserta antrian virtual tiap detik. Gagal (mis. Redis sesaat putus) hanya
 // dicatat; putaran berikutnya mencoba lagi.

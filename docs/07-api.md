@@ -109,6 +109,22 @@ Objek peserta:
 
 Bukan anggota → 404 `org_not_found`. Peran tidak cukup → 403 `forbidden`. Event/kategori milik org lain → 404.
 
+### Keuangan mitra (owner, finance)
+
+`admin` dan `rpc_staff` → 403 `forbidden`; bukan anggota → 404. Uang selalu bilangan bulat rupiah. Lihat [04](04-pembayaran-dan-ledger.md).
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| GET | `/v1/org/{org}/finance/summary` | `balances` (`held`, `available`, `in_process`, `paid_out`; `available` bisa negatif), `account` tersamar (`bank_name`, `account_holder`, `last4`) atau `null`, `rules` (`payout_min`, `hold_days`), `can_payout`, `blocker` (`code`, `message`) bila tidak bisa, `mock` |
+| GET | `/v1/org/{org}/finance/ledger?page=` | mutasi saldo: `items[]` (`at`, `kind`, `description`, `account` tertahan/tersedia/dalam_proses, `amount` ±, `ref`), `total`, 20 per halaman |
+| GET | `/v1/org/{org}/payouts?page=` | riwayat pencairan (`status`, `account` snapshot, `reject_reason`, `fail_reason`, `reference_no`, waktu) |
+| POST | `/v1/org/{org}/payouts` | `{"amount": 500000}` + header **`Idempotency-Key`** (wajib; kunci sama → payout yang sama). 201 · 400 `idempotency_key_required` · 409 `org_not_verified` / `no_payout_account` / `payout_in_progress` · 422 `below_minimum` / `insufficient_balance` / `validation` (bukan bilangan bulat) |
+| GET | `/v1/org/{org}/orders?event=&q=&status=&page=` | order lunas/di-refund (`q` = email pembeli atau awalan ID order); tanpa data peserta; `refund_status`, `collected_tickets` |
+| POST | `/v1/org/{org}/orders/{id}/refund` | `{"reason"}` 10–500 karakter → 201 refund `requested` · 404 order org lain · 409 `already_refunded` / `order_not_refundable` |
+| GET | `/v1/org/{org}/refunds?page=` | status refund org |
+| GET | `/v1/org/{org}/reports/sales` | ringkasan per event (`orders_paid`, `orders_refunded`, `gross`, `platform_fee`, `pg_fee`, `refunds`, `net`) |
+| GET | `/v1/org/{org}/reports/sales.csv`, `/reports/ledger.csv` | CSV UTF-8 BOM, pemisah `;`, aman injeksi rumus; tercatat `report.download` |
+
 ### Verifikasi mitra (owner saja)
 
 Semua respons sukses (kecuali unduhan dokumen) = keadaan lengkap: `kyc_status`, `auto_verify`, `verification` (pengajuan terbaru atau `null`; NIK/NPWP/rekening **tersamar** `••••1234`, `documents[]`), `history[]` (semua pengajuan: `attempt`, `status`, `submitted_at`, `reviewed_at`, `reject_reason`), `requirements` (matriks jenis & dokumen, daftar bank, teks + versi persetujuan, `max_bytes`). Status pengajuan: `draft` → `submitted` → `approved` | `rejected`.
@@ -146,7 +162,26 @@ Anonim → 401 `unauthenticated`. Login tapi bukan super admin → **404** `not_
 | POST | `/v1/admin/verifications/{id}/approve` | → org `verified` + email; respons = detail |
 | POST | `/v1/admin/verifications/{id}/reject` | `{"reason"}` 10–1.000 karakter (422 `fields.reason`) → org `rejected` + email berisi alasan |
 
-Approve/reject: 403 `conflict_of_interest` bila super admin anggota org itu; 409 `invalid_status` bila bukan `submitted`. Kunci enkripsi salah/berkas rusak → 500 `decrypt_failed` (tidak pernah mengirim data rusak).
+Approve/reject: 403 `conflict_of_interest` bila super admin anggota org itu; 409 `invalid_status` bila bukan `submitted`. Kunci enkripsi salah/berkas rusak → 500 `decrypt_failed` (tidak pernah mengirim data rusak). Menyetujui verifikasi juga membuat rekening pencairan (`payout_accounts`, terenkripsi) org itu.
+
+### Keuangan (super admin)
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| GET | `/v1/admin/payouts?status=&page=` | `status` `requested` (default, terlama dulu) / `approved` / `processing` / `completed` / `failed` / `rejected` / `all`; `items[]` + `org_available` (saldo tersedia org sekarang), `counts`, `mock` |
+| GET | `/v1/admin/payouts/{id}` | `payout`, `balances` org, `history` (pencairan lain org), `org_kyc_status`, `conflict_of_interest`, `mock` |
+| POST | `/v1/admin/payouts/{id}/reveal` | `{}` → `{"value"}` nomor rekening lengkap; tercatat `payout.account.reveal` |
+| POST | `/v1/admin/payouts/{id}/approve` | `requested` → `approved` (worker mengeksekusi). 403 `conflict_of_interest` · 409 `invalid_state` |
+| POST | `/v1/admin/payouts/{id}/reject` | `{"reason"}` 10–1.000 → `rejected`, saldo kembali. 422 `fields.reason` |
+| GET | `/v1/admin/refunds?status=&page=` | `requested` (default) / `approved` / `processing` / `manual_required` / `completed` / `rejected` / `failed` / `all` |
+| POST | `/v1/admin/refunds` | `{"order_id","reason"}` → refund dibuat **dan langsung disetujui** (201) |
+| POST | `/v1/admin/refunds/{id}/approve` | order + tiket `refunded`, jurnal `order.refund`; worker mengirim dana |
+| POST | `/v1/admin/refunds/{id}/reject` | `{"reason"}` 10–1.000 |
+| POST | `/v1/admin/refunds/{id}/mark-done` | `{"reference"}` 3–100 karakter; hanya dari `manual_required`/`failed` → `completed` |
+| GET | `/v1/admin/finance/overview` | total tertahan/tersedia/dalam proses seluruh mitra, `platform_revenue`, `refund_pg_cost`, `cash`, `accounts` (saldo debit−kredit per akun), hitungan status, `disburse_mode`, `mock` |
+| GET | `/v1/admin/ledger/check` | `{"ok", "checks":[{"name","ok","detail"}]}` |
+
+Semua keputusan keuangan: 403 `conflict_of_interest` bila super admin anggota org; 409 `invalid_state` bila status sudah berubah (klik ganda/paralel aman).
 
 Form event (`POST`/`PATCH`):
 

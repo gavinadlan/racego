@@ -12,7 +12,7 @@ Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menj
 RaceGo/
 ├── backend/            API + worker (Go, modular monolith)
 │   ├── cmd/            api · worker · migrate · keygen · healthcheck
-│   ├── internal/       checkout · queue · payment · ticket · ledger · tenant · event · worker · ...
+│   ├── internal/       checkout · queue · payment · ticket · ledger · finance · tenant · event · worker · ...
 │   └── migrations/     skema SQL + seed data contoh
 ├── frontend/           Web Next.js 16 (pelari, dashboard mitra, scanner race pack)
 ├── docs/               PRD, arsitektur, war tiket, pembayaran, tiket QR, infra gratis, API, deploy, ADR
@@ -60,6 +60,7 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | `make grant EMAIL=… ORG=… ROLE=…` | Beri akun sungguhan peran di penyelenggara |
 | `make superadmin EMAIL=…` | Jadikan akun super admin: meninjau verifikasi mitra di `/admin` |
 | `make verify ORG=…` | Jalan pintas: verifikasi penyelenggara tanpa pengajuan (bila `AUTO_VERIFY_ORGS=false`) |
+| `make dev-release ORG=…` | Development: rilis saldo tertahan mitra tanpa menunggu masa tahan (uji pencairan) |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
 | `make loadtest` | Uji beban war tiket dengan k6 |
 | `make queue-demo` / `make queue-load` | Event demo ber-antrian untuk dicoba di browser / uji beban antrian virtual (10.000 pengguna palsu) |
@@ -88,12 +89,13 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Multi-tenant (mitra, peran, isolasi data) | |
 | Reservasi atomik Redis + timer + pengembalian kuota | Turnstile / anti-bot, ballot |
 | Antrian virtual opsional per event (lobi diundi, pemanggilan bertahap, pass HMAC) | Antrian lintas event |
-| Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan dana via Midtrans Payouts |
+| Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan ke Iris sandbox sungguhan (klien teruji server palsu), ganti rekening |
 | Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
 | Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | Kupon & harga bertahap |
 | Verifikasi mitra: dokumen & rekening terenkripsi, peninjauan super admin `/admin` | Rotasi kunci enkripsi |
-| Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund |
+| Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund parsial/massal |
 | Scanner race pack (kamera, manual, anti dobel scan) | Row-Level Security Postgres |
-| Ledger double-entry + email tiket | Observabilitas (Grafana) |
+| Ledger double-entry append-only + email tiket | Observabilitas (Grafana) |
+| Keuangan mitra: saldo tertahan/tersedia, pencairan maker-checker (mock / Midtrans Payouts), refund per order, laporan CSV, cek integritas ledger | Rekonsiliasi settlement Midtrans, kuota kembali setelah refund |
 
 Dokumen PRD & arsitektur lengkap: [docs/](docs/README.md).

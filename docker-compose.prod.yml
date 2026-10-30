@@ -50,6 +50,14 @@ x-backend: &backend
     SMTP_USERNAME: ${SMTP_USERNAME:-}
     SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     MAIL_FROM: ${MAIL_FROM:-RaceGo <no-reply@racego.local>}
+    # Keuangan mitra (docs/04-pembayaran-dan-ledger.md). DISBURSE_MODE=mock = tidak ada uang sungguhan yang dikirim.
+    PAYOUT_HOLD_DAYS: ${PAYOUT_HOLD_DAYS:-3}
+    PAYOUT_MIN: ${PAYOUT_MIN:-50000}
+    DISBURSE_MODE: ${DISBURSE_MODE:-mock}
+    DISBURSE_MOCK_DELAY: ${DISBURSE_MOCK_DELAY:-5s}
+    IRIS_BASE_URL: ${IRIS_BASE_URL:-https://app.sandbox.midtrans.com/iris/api/v1}
+    IRIS_CREATOR_KEY: ${IRIS_CREATOR_KEY:-}
+    IRIS_APPROVER_KEY: ${IRIS_APPROVER_KEY:-}
 
 services:
   postgres:
@@ -103,8 +111,8 @@ services:
     command: ["/app/api"]
     environment:
       <<: *backend-env
-      # Dokumen verifikasi mitra (terenkripsi, privat; tidak ada rute statis). Hanya api yang memegang kunci;
-      # kunci WAJIB dicadangkan terpisah dari backup data.
+      # Dokumen verifikasi mitra (terenkripsi, privat; tidak ada rute statis). Kunci WAJIB dicadangkan
+      # terpisah dari backup data.
       KYC_DIR: /data/kyc
       KYC_ENC_KEY: ${KYC_ENC_KEY:?jalankan scripts/gen-secrets.sh}
     volumes:
@@ -127,6 +135,10 @@ services:
   worker:
     <<: *backend
     command: ["/app/worker"]
+    environment:
+      <<: *backend-env
+      # Worker membuka nomor rekening pencairan (terenkripsi) tepat sebelum dikirim ke gateway.
+      KYC_ENC_KEY: ${KYC_ENC_KEY:?jalankan scripts/gen-secrets.sh}
     depends_on:
       migrate:
         condition: service_completed_successfully

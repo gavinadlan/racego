@@ -105,6 +105,9 @@ Buka `.env.prod` (`nano .env.prod`) dan isi:
 | `MIDTRANS_SERVER_KEY`, `MIDTRANS_CLIENT_KEY` | Kunci **sandbox** dari [dashboard.sandbox.midtrans.com](https://dashboard.sandbox.midtrans.com) (*Settings → Access Keys*). Kosongkan keduanya untuk mode mock: tombol "Simulasikan bayar" muncul. `MIDTRANS_IS_PRODUCTION` tetap `false`. |
 | `AUTO_VERIFY_ORGS` | `false` (default aman): penyelenggara baru mengajukan verifikasi dan ditinjau super admin di `/admin` sebelum bisa menerbitkan event. Untuk demo boleh `true`. |
 | `KYC_ENC_KEY` | Diisi `gen-secrets.sh` (base64 32 byte) dan **tidak pernah ditimpanya**. Mengenkripsi dokumen verifikasi serta NIK/rekening/NPWP. **Kunci hilang atau berubah = semua data itu tidak bisa dibuka lagi, termasuk dari backup.** Simpan salinannya di pengelola password, terpisah dari backup. Kosong → api menolak start. |
+| `PAYOUT_HOLD_DAYS`, `PAYOUT_MIN` | Masa tahan saldo mitra setelah hari lomba (3) dan pencairan minimum (50000). Nilai tidak valid → api & worker menolak start. |
+| `DISBURSE_MODE` | `mock` (default): pencairan & refund **hanya simulasi**, tidak ada uang sungguhan; log api/worker memperingatkan dan halaman admin keuangan menampilkan banner merah. `midtrans`: Midtrans Payouts (Iris) + refund Core API; butuh `IRIS_CREATOR_KEY`, `IRIS_APPROVER_KEY` (didaftarkan sendiri di dashboard Iris, diisi **manual**; `gen-secrets.sh` tidak mengisinya) dan `MIDTRANS_SERVER_KEY`. Sebelum uang sungguhan: konfirmasi skema dana ke Midtrans & konsultan hukum, aktifkan 2FA super admin (belum ada). |
+| `DISBURSE_MOCK_DELAY`, `IRIS_BASE_URL` | Jeda simulasi (5s) dan alamat Iris (default sandbox). |
 | `QUEUE_*` (opsional) | Antrian virtual untuk event yang mencentangnya: `QUEUE_LOBBY_MINUTES` (15), `QUEUE_ADMIT_PER_SEC` (20), `QUEUE_MAX_ACTIVE` (300), `QUEUE_PASS_TTL` (10m), `QUEUE_HEARTBEAT_TTL` (45s). Default cocok untuk server 2 CPU; arti tiap nilai di [03-war-tiket](03-war-tiket.md#parameter-env). |
 
 `FRONTEND_URL` tidak perlu diisi; nilainya otomatis `https://$SITE_ADDRESS`. Pengaturan produksi lain sudah dipasang di `docker-compose.prod.yml`: `APP_ENV=production`, dev login mati, dan `UPLOAD_DIR=/data/uploads` di volume.
@@ -183,7 +186,9 @@ rsync -a racego@IP_SERVER:racego/backups/ ~/racego-backups/
 
 Simpan `.env.prod` terpisah dari backup (di pengelola password). Backup tanpa kunci QR yang sama membuat QR tiket lama tidak sah.
 
-**`KYC_ENC_KEY` sengaja tidak ikut backup.** Backup berisi data verifikasi yang terenkripsi; kalau kuncinya ikut tersimpan di folder yang sama, backup yang bocor bisa dibuka. Sebaliknya, backup tanpa kunci tidak berguna untuk data verifikasi. Jadi: salin `KYC_ENC_KEY` sekali ke pengelola password (atau brankas lain yang terpisah dari tempat backup disalin), dan pastikan setiap server baru memakai kunci yang sama.
+Backup juga berisi ledger, pencairan, dan refund. `pg_restore` memuat data sebelum membuat trigger ledger append-only, jadi restore tetap jalan; setelah restore, buka `/admin/keuangan` dan pastikan **Pemeriksaan integritas ledger** hijau.
+
+**`KYC_ENC_KEY` sengaja tidak ikut backup.** Worker juga memakai kunci ini (membuka nomor rekening tepat sebelum transfer). Backup berisi data verifikasi yang terenkripsi; kalau kuncinya ikut tersimpan di folder yang sama, backup yang bocor bisa dibuka. Sebaliknya, backup tanpa kunci tidak berguna untuk data verifikasi. Jadi: salin `KYC_ENC_KEY` sekali ke pengelola password (atau brankas lain yang terpisah dari tempat backup disalin), dan pastikan setiap server baru memakai kunci yang sama.
 
 **Restore** ke stack yang sedang berjalan (juga di server baru setelah `make prod-up` dengan `.env.prod` yang sama):
 
@@ -198,6 +203,7 @@ Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worke
 - [ ] `https://SITE_ADDRESS` terbuka dengan gembok hijau, dan `http://` dialihkan ke `https://`.
 - [ ] Menu **Akun contoh (dev)** tidak ada; `curl -H 'X-User-ID: 11111111-1111-1111-1111-111111111111' https://SITE_ADDRESS/v1/me` → 401.
 - [ ] `AUTO_VERIFY_ORGS=false` (kecuali memang demo).
+- [ ] `DISBURSE_MODE` sesuai niat: `mock` = banner merah di `/admin/keuangan`, tidak ada uang sungguhan yang dikirim. `/admin/keuangan` → integritas ledger hijau.
 - [ ] `QR_PRIVATE_KEY` baru dari `gen-secrets.sh` (bukan kunci dev), dan salinannya tersimpan di luar server.
 - [ ] `KYC_ENC_KEY` terisi dari `gen-secrets.sh` dan salinannya tersimpan terpisah dari backup.
 - [ ] Akun super admin dibuat (`make prod-superadmin EMAIL=…`), dan hanya untuk orang yang memang meninjau mitra.

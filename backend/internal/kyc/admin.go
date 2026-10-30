@@ -311,6 +311,18 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request, approve bool, r
 		if rr != nil {
 			after["reason"] = reason
 		}
+		if approve {
+			// Rekening pencairan = rekening dari pengajuan yang disetujui (ciphertext disalin apa adanya).
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO payout_accounts (org_id, bank_code, bank_name, account_holder, account_enc, account_last4, verified_at, verification_id)
+				SELECT org_id, bank_code, bank_name, account_holder, account_enc, account_last4, now(), id
+				FROM org_verifications WHERE id = $1 AND account_enc IS NOT NULL AND account_last4 IS NOT NULL
+				ON CONFLICT (org_id) DO UPDATE SET bank_code = EXCLUDED.bank_code, bank_name = EXCLUDED.bank_name,
+				  account_holder = EXCLUDED.account_holder, account_enc = EXCLUDED.account_enc, account_last4 = EXCLUDED.account_last4,
+				  verified_at = EXCLUDED.verified_at, verification_id = EXCLUDED.verification_id`, v.ID); err != nil {
+				return err
+			}
+		}
 		if err := audit(ctx, tx, r, v.OrgID, action, v.ID.String(), after); err != nil {
 			return err
 		}

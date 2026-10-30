@@ -28,14 +28,14 @@ Satu user bisa menjadi pelari sekaligus staf di beberapa mitra (RBAC per tenant)
 5. Dashboard mitra + scanner race pack di web yang sama.
 6. **Portal mitra mandiri**: siapa pun yang login bisa mendaftarkan penyelenggara, membuat event + kategori tiket, mengunggah poster/logo, menerbitkan event (setelah penyelenggara terverifikasi), dan mengundang staf. Tanpa campur tangan tim RaceGo selain verifikasi.
 7. **Verifikasi mitra (KYC)**: owner mengirim jenis penyelenggara (perorangan/komunitas/badan usaha), identitas PIC, dokumen sesuai jenis, dan rekening bank; super admin menyetujui atau menolak dengan alasan, mitra memperbaiki lalu mengajukan ulang. Dokumen dan NIK/rekening/NPWP disimpan terenkripsi dan setiap aksesnya tercatat. Tanpa OCR, cek rekening otomatis, atau layanan KYC pihak ketiga. Kebijakan retensi data belum ditetapkan; ini bukan klaim kepatuhan hukum.
-8. Ledger double-entry; saldo mitra & pencairan via Midtrans Payouts menyusul (belum ada di versi ini).
+8. **Keuangan mitra**: ledger double-entry append-only; saldo mitra tertahan → tersedia 3 hari setelah hari lomba; owner/finance mengajukan pencairan ke rekening hasil verifikasi, super admin menyetujui (maker-checker), transfer lewat Midtrans Payouts (atau mode simulasi); refund per order (diajukan mitra atau dibuat super admin, disetujui super admin; tiket langsung tidak berlaku); laporan penjualan & mutasi saldo (CSV); pemeriksaan integritas ledger. Belum ada: ganti rekening, refund parsial/massal, rekonsiliasi settlement Midtrans. Skema dana ditampung platform perlu konfirmasi Midtrans & konsultan hukum sebelum uang sungguhan.
 
 Di luar MVP: aplikasi native, live tracking, hasil race/timing chip, marketplace merchandise.
 
 ## Model bisnis
 
 - Fee platform per tiket (default 3%, disimpan per mitra di `organizations.fee_bps`), saat ini ditanggung mitra.
-- Biaya payment gateway mengikuti metode bayar (mis. VA Rp4.000 + PPN 11% = Rp4.440).
+- Biaya payment gateway mengikuti metode bayar (mis. VA Rp4.000 + PPN 11% = Rp4.440). Saat refund, biaya PG yang tidak kembali ditanggung platform (`beban_refund_pg`); pembeli menerima total penuh.
 
 Contoh tiket 21K Rp350.000 via VA: biaya PG Rp4.440, fee platform Rp10.500, hak mitra **Rp335.060** (diuji di `backend/internal/ledger/ledger_test.go`).
 

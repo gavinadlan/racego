@@ -12,7 +12,6 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [x] **CRUD event & kategori** dari dashboard mitra (draft → published → closed, kunci harga setelah ada penjualan, kuota disesuaikan atomik di Redis)
 - [x] **Onboarding mitra versi dasar**: daftar dari web, `kyc_status` + `make verify`
 - [x] **Verifikasi mitra (KYC)**: identitas, dokumen per jenis penyelenggara, rekening bank; terenkripsi (AES-256-GCM), akses tercatat; super admin meninjau di `/admin`, tolak dengan alasan + ajukan ulang
-- [ ] 2FA untuk super admin
 - [ ] Kebijakan retensi & job penghapusan/anonimisasi data verifikasi
 - [ ] Rotasi `KYC_ENC_KEY` (format `v1:` sudah siap untuk versi kunci baru)
 - [ ] Pencabutan/penangguhan org terverifikasi
@@ -27,11 +26,21 @@ Urut dari yang paling berdampak. Centang bila selesai.
 
 ## Fase 2 — keuangan
 
-- [ ] Saldo mitra: tertahan → tersedia (job harian sesuai kebijakan)
+- [x] Saldo mitra: tertahan → tersedia `PAYOUT_HOLD_DAYS` setelah hari lomba (worker tiap jam, `make dev-release`)
+- [x] Pengajuan pencairan + persetujuan maker-checker super admin + Midtrans Payouts (mock & klien Iris teruji server palsu; belum dicoba ke sandbox Iris asli)
+- [x] Refund per order (diajukan mitra / dibuat super admin, disetujui super admin), tiket batal, jurnal ledger refund, refund manual untuk metode tanpa API
+- [x] Laporan penjualan & mutasi saldo (CSV aman injeksi rumus), ringkasan keuangan platform + pemeriksaan integritas ledger
+- [x] Ledger append-only dijaga trigger database
+- [ ] Ganti rekening pencairan (verifikasi ulang)
+- [ ] Refund parsial (per peserta)
+- [ ] Refund massal saat event dibatalkan
+- [ ] Pengembalian kuota ke penjualan setelah refund
+- [ ] Rekonsiliasi harian dengan laporan settlement Midtrans; ganti estimasi biaya PG dengan angka asli
+- [ ] Biaya transfer pencairan (siapa menanggung, jurnal sendiri)
+- [ ] 2FA super admin (wajib sebelum uang sungguhan)
+- [ ] Notifikasi webhook Iris (status pencairan tanpa menunggu cek berkala)
+- [ ] Batas harian pencairan per org & platform
 - [ ] Kupon & harga bertahap (early bird)
-- [ ] Pengajuan payout + persetujuan maker-checker + Midtrans Payouts (sandbox)
-- [ ] Rekonsiliasi harian dengan laporan Midtrans; ganti estimasi biaya PG dengan angka asli
-- [ ] Refund (manual oleh mitra) + jurnal ledger refund
 
 ## Fase 3 — skala & operasional
 
