@@ -1,8 +1,8 @@
 # Image tunggal berisi semua binary (api, worker, migrate, keygen, healthcheck).
 # Build:  docker build -t racego-backend ./backend
 # Jalan:  lihat docker-compose.prod.yml (api, worker, migrate memakai image ini)
-# Versi Go mengikuti baris `go` di go.mod (minor yang sama, patch terbaru).
-FROM golang:1.24-alpine AS build
+# Versi Go sama dengan baris `toolchain` di go.mod (CI memakai go.mod yang sama lewat setup-go).
+FROM golang:1.27.3-alpine AS build
 WORKDIR /src
 ENV GOTOOLCHAIN=local
 COPY go.mod go.sum ./

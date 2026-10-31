@@ -8,7 +8,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] **Login Google**
 - [ ] **Profil pelari** (`runner_profiles`): isi sekali, prefill semua peserta
 - [x] **Antrian virtual (waiting room)** per event: lobi + urutan acak, pemanggilan bertahap, pass HMAC, ringkasan langsung untuk mitra
-- [ ] **Turnstile / anti-bot** di antrian & tombol Daftar, batas per NIK, deteksi akun ganda (antrian belum mencegahnya)
+- [x] **Turnstile (opsional)** di permintaan kode OTP & saat masuk antrean (bukan di checkout); menyulitkan skrip sederhana, tidak menghentikan bot canggih
+- [ ] **Anti multi-akun**: batas per NIK, deteksi akun/perangkat ganda (antrian & Turnstile belum mencegahnya)
 - [x] **CRUD event & kategori** dari dashboard mitra (draft → published → closed, kunci harga setelah ada penjualan, kuota disesuaikan atomik di Redis)
 - [x] **Onboarding mitra versi dasar**: daftar dari web, `kyc_status` + `make verify`
 - [x] **Verifikasi mitra (KYC)**: identitas, dokumen per jenis penyelenggara, rekening bank; terenkripsi (AES-256-GCM), akses tercatat; super admin meninjau di `/admin`, tolak dengan alasan + ajukan ulang
@@ -18,11 +19,12 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Verifikasi ulang saat owner mengganti rekening bank
 - [ ] Notifikasi super admin saat ada pengajuan baru
 - [ ] **Row-Level Security** Postgres untuk tabel milik mitra
-- [ ] Export peserta (CSV/XLSX) untuk mitra
+- [x] Export peserta CSV untuk mitra: halaman Peserta (cari, filter, ringkasan jersey/status), nomor identitas tersamar, unduhan di-stream, dibatasi & tercatat di audit
+- [ ] Export XLSX, kolom peserta yang bisa dikustomisasi
 - [x] Upload poster event & logo penyelenggara (disk lokal, EXIF dibuang)
 - [ ] Pembersihan berkala gambar yang tidak dipakai; pindah ke S3/R2
 - [x] Undang staf versi dasar (tambah anggota yang sudah pernah login)
-- [ ] Undangan staf via email
+- [ ] Undangan staf (termasuk staf RPC) via email
 
 ## Fase 2 — keuangan
 
@@ -35,7 +37,7 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Refund parsial (per peserta)
 - [ ] Refund massal saat event dibatalkan
 - [ ] Pengembalian kuota ke penjualan setelah refund
-- [ ] Rekonsiliasi harian dengan laporan settlement Midtrans; ganti estimasi biaya PG dengan angka asli
+- [ ] Rekonsiliasi settlement: harian dengan laporan settlement Midtrans; ganti estimasi biaya PG dengan angka asli
 - [ ] Biaya transfer pencairan (siapa menanggung, jurnal sendiri)
 - [ ] 2FA super admin (wajib sebelum uang sungguhan)
 - [ ] Notifikasi webhook Iris (status pencairan tanpa menunggu cek berkala)

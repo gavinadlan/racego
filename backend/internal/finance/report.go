@@ -3,17 +3,17 @@ package finance
 import (
 	"bytes"
 	"context"
-	"encoding/csv"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/gavinadlan/racego/backend/internal/csvx"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/ledger"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
@@ -220,46 +220,39 @@ func (s *Service) Ledger(w http.ResponseWriter, r *http.Request) {
 
 // ===== CSV =====
 
-// CSVSafe menetralkan injeksi rumus: sel yang diawali = + - @ tab atau CR diberi awalan '.
-func CSVSafe(v string) string {
-	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
-		return "'" + v
-	}
-	return v
-}
-
-// writeCSV: UTF-8 dengan BOM dan pemisah titik koma, agar terbuka benar di Excel berlokal Indonesia.
-func writeCSV(header []string, rows [][]string) []byte {
-	var buf bytes.Buffer
-	buf.WriteString("\uFEFF")
-	cw := csv.NewWriter(&buf)
-	cw.Comma = ';'
-	cw.UseCRLF = true
-	_ = cw.Write(header)
-	for _, row := range rows {
-		safe := make([]string, len(row))
-		for i, v := range row {
-			safe[i] = CSVSafe(v)
-		}
-		_ = cw.Write(safe)
-	}
-	cw.Flush()
-	return buf.Bytes()
-}
-
-func (s *Service) sendCSV(w http.ResponseWriter, r *http.Request, name, kind string, rows int, data []byte) {
+// sendCSV: audit dulu, lalu tulis CSV aman (csvx: jenis sel dari tipe Go, teks disanitasi).
+func (s *Service) sendCSV(w http.ResponseWriter, r *http.Request, name, kind string, header []string, rows [][]any) {
 	m, _ := tenant.FromContext(r.Context())
-	if err := audit(r.Context(), s.db, r, m.OrgID, "report.download", "report", kind, nil, map[string]any{"rows": rows}); err != nil {
+	if err := audit(r.Context(), s.db, r, m.OrgID, "report.download", "report", kind, nil, map[string]any{"rows": len(rows)}); err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	var buf bytes.Buffer
+	if err := writeCSV(&buf, header, rows); err != nil {
 		httpx.Internal(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s-%s.csv"`, name, m.OrgSlug, time.Now().Format("20060102")))
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
+	_, _ = w.Write(buf.Bytes())
 }
 
-func i64(v int64) string { return strconv.FormatInt(v, 10) }
+func writeCSV(out io.Writer, header []string, rows [][]any) error {
+	cw, err := csvx.New(out)
+	if err != nil {
+		return err
+	}
+	if err := cw.Header(header...); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := cw.Row(row...); err != nil {
+			return err
+		}
+	}
+	return cw.Flush()
+}
 
 // SalesCSV: GET /v1/org/{org}/reports/sales.csv — tercatat di audit.
 func (s *Service) SalesCSV(w http.ResponseWriter, r *http.Request) {
@@ -268,13 +261,13 @@ func (s *Service) SalesCSV(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	rows := make([][]string, 0, len(list))
+	rows := make([][]any, 0, len(list))
 	for _, e := range list {
-		rows = append(rows, []string{e.EventName, e.RaceDate, strconv.Itoa(e.OrdersPaid), strconv.Itoa(e.OrdersRefunded),
-			i64(e.Gross), i64(e.PlatformFee), i64(e.PGFee), i64(e.Refunds), i64(e.Net)})
+		rows = append(rows, []any{e.EventName, e.RaceDate, e.OrdersPaid, e.OrdersRefunded,
+			e.Gross, e.PlatformFee, e.PGFee, e.Refunds, e.Net})
 	}
-	s.sendCSV(w, r, "penjualan", "sales", len(rows), writeCSV([]string{"Event", "Tanggal lomba", "Order lunas", "Order di-refund",
-		"Bruto (Rp)", "Fee platform (Rp)", "Biaya PG estimasi (Rp)", "Refund (Rp)", "Bersih mitra (Rp)"}, rows))
+	s.sendCSV(w, r, "penjualan", "sales", []string{"Event", "Tanggal lomba", "Order lunas", "Order di-refund",
+		"Bruto (Rp)", "Fee platform (Rp)", "Biaya PG estimasi (Rp)", "Refund (Rp)", "Bersih mitra (Rp)"}, rows)
 }
 
 // LedgerCSV: GET /v1/org/{org}/reports/ledger.csv — tercatat di audit.
@@ -285,11 +278,11 @@ func (s *Service) LedgerCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wib := time.FixedZone("WIB", 7*3600)
-	rows := make([][]string, 0, len(list))
+	rows := make([][]any, 0, len(list))
 	for _, m := range list {
-		rows = append(rows, []string{m.At.In(wib).Format("2006-01-02 15:04:05"), m.Description, m.Account, i64(m.Amount), m.Ref})
+		rows = append(rows, []any{m.At.In(wib).Format("2006-01-02 15:04:05"), m.Description, m.Account, m.Amount, m.Ref})
 	}
-	s.sendCSV(w, r, "mutasi-saldo", "ledger", len(rows), writeCSV([]string{"Waktu (WIB)", "Keterangan", "Saldo", "Jumlah (Rp)", "Referensi"}, rows))
+	s.sendCSV(w, r, "mutasi-saldo", "ledger", []string{"Waktu (WIB)", "Keterangan", "Saldo", "Jumlah (Rp)", "Referensi"}, rows)
 }
 
 // ===== Super admin: ringkasan platform & integritas =====

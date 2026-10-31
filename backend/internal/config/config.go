@@ -41,7 +41,19 @@ type Config struct {
 	SMTPUsername string // kosong untuk Mailpit; isi untuk Resend/penyedia SMTP lain
 	SMTPPassword string
 	MailFrom     string
+
+	Turnstile TurnstileConfig
 }
+
+// TurnstileConfig: anti-bot Cloudflare Turnstile di permintaan kode OTP dan masuk antrean.
+// Kedua kunci kosong = fitur mati total; hanya satu yang terisi = Validate menolak start.
+type TurnstileConfig struct {
+	SiteKey   string // publik; frontend memakai NEXT_PUBLIC_TURNSTILE_SITE_KEY (nilai sama)
+	SecretKey string // rahasia; hanya untuk siteverify
+	VerifyURL string // kosong = siteverify Cloudflare; diganti hanya untuk uji dengan server palsu lokal
+}
+
+func (t TurnstileConfig) Enabled() bool { return t.SecretKey != "" }
 
 // QueueConfig mengatur antrian virtual (waiting room). Lihat docs/03-war-tiket.md.
 type QueueConfig struct {
@@ -138,6 +150,11 @@ func Load() Config {
 		SMTPUsername:   os.Getenv("SMTP_USERNAME"),
 		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
 		MailFrom:       get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
+		Turnstile: TurnstileConfig{
+			SiteKey:   os.Getenv("TURNSTILE_SITE_KEY"),
+			SecretKey: os.Getenv("TURNSTILE_SECRET_KEY"),
+			VerifyURL: os.Getenv("TURNSTILE_VERIFY_URL"),
+		},
 	}
 }
 
@@ -152,6 +169,9 @@ func (c Config) Validate() error {
 		if c.MidtransMock() {
 			errs = append(errs, errors.New("DISBURSE_MODE=midtrans butuh MIDTRANS_SERVER_KEY untuk refund lewat Core API"))
 		}
+	}
+	if (c.Turnstile.SiteKey == "") != (c.Turnstile.SecretKey == "") {
+		errs = append(errs, errors.New("TURNSTILE_SITE_KEY dan TURNSTILE_SECRET_KEY harus diisi berpasangan (atau dikosongkan keduanya untuk mematikan Turnstile)"))
 	}
 	return errors.Join(errs...)
 }

@@ -23,6 +23,10 @@
 html {
   scroll-behavior: smooth;
 }
+/* Latar tidak ikut ter-scroll selama dialog modal (ConfirmDialog) terbuka. */
+html:has(dialog:modal) {
+  overflow: hidden;
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

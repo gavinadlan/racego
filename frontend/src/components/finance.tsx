@@ -45,12 +45,12 @@ export const maskedAccount = (a: { bank_name: string; last4: string; account_hol
 const digits = (s: string) => s.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 13);
 const withDots = (s: string) => (s ? Number(s).toLocaleString("id-ID") : "");
 
-function errorText(err: unknown, fallback: string) {
+export function errorText(err: unknown, fallback: string) {
   if (err instanceof ApiError) return err.fields ? Object.values(err.fields).join(" ") : err.message;
   return fallback;
 }
 
-function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
+export function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
   if (total <= pageSize) return null;
   const pages = Math.ceil(total / pageSize);
   return (
@@ -68,7 +68,7 @@ function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: numb
   );
 }
 
-function Download({ path, name, label }: { path: string; name: string; label: string }) {
+export function Download({ path, name, label }: { path: string; name: string; label: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (

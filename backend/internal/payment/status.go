@@ -113,7 +113,8 @@ func (r *Reconciler) fetch(ctx context.Context, orderID string) (Notification, [
 		return Notification{}, nil, errNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Notification{}, nil, fmt.Errorf("status midtrans %d: %s", resp.StatusCode, raw)
+		// Hanya kode HTTP: body bisa memuat detail transaksi pembeli dan error ini dicatat di log.
+		return Notification{}, nil, fmt.Errorf("status midtrans: HTTP %d", resp.StatusCode)
 	}
 	var n Notification
 	if err := json.Unmarshal(raw, &n); err != nil {
@@ -125,7 +126,7 @@ func (r *Reconciler) fetch(ctx context.Context, orderID string) (Notification, [
 		return Notification{}, nil, errNotFound
 	case "200", "201", "202", "407":
 	default:
-		return Notification{}, nil, fmt.Errorf("status midtrans %s: %s", n.StatusCode, raw)
+		return Notification{}, nil, fmt.Errorf("status midtrans: status_code %q, transaction_status %q", n.StatusCode, n.TransactionStatus)
 	}
 	if n.OrderID != orderID {
 		return Notification{}, nil, fmt.Errorf("status midtrans: order_id %q tidak cocok", n.OrderID)

@@ -11,6 +11,7 @@
 -- ARGV[4] id reservasi
 -- ARGV[5] nilai hold ("<uid>|<qty>")
 -- ARGV[6] TTL key hold dalam detik (lebih panjang dari hold, untuk jaga-jaga)
+-- ARGV[7] TTL minimal key jumlah milik user (detik); hanya memperpanjang, tidak pernah memperpendek
 --
 -- Hasil: >=0 sisa stok | -1 sold out | -2 melebihi batas per user | -3 penjualan belum dibuka
 local stock = redis.call('GET', KEYS[1])
@@ -30,6 +31,9 @@ end
 
 redis.call('DECRBY', KEYS[1], qty)
 redis.call('INCRBY', KEYS[2], qty)
+if redis.call('TTL', KEYS[2]) < tonumber(ARGV[7]) then
+  redis.call('EXPIRE', KEYS[2], ARGV[7])
+end
 redis.call('ZADD', KEYS[3], ARGV[3], ARGV[4])
 redis.call('SET', KEYS[4], ARGV[5], 'EX', ARGV[6])
 return stock - qty

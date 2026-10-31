@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { assetUrl } from "@/lib/api";
 import { btnDark, btnGhost } from "./ui";
 
 /**
  * Dialog konfirmasi memakai <dialog> bawaan browser: fokus terkunci di dalam, Escape menutup,
- * fokus kembali ke tombol pemicu. Dipakai untuk aksi yang tidak bisa dibatalkan.
+ * fokus kembali ke tombol pemicu, latar tidak bisa di-scroll (globals.css). Dipakai untuk aksi yang
+ * tidak bisa dibatalkan. Satu-satunya modal di aplikasi: semua dialog lewat komponen ini.
  */
 export function ConfirmDialog({
   open,
@@ -31,12 +32,30 @@ export function ConfirmDialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  });
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) d.showModal();
     if (!open && d.open) d.close();
   }, [open]);
+  // Navigasi: Next.js (cacheComponents) tidak membongkar halaman lama, hanya menyembunyikannya dengan
+  // <Activity>. Dialog modal yang masih terbuka di halaman tersembunyi membuat halaman baru inert
+  // (tidak bisa diklik). Cleanup ini jalan sinkron saat halaman disembunyikan/dibongkar: tutup dialog
+  // dan reset state pemanggil, jadi tautan/router.push dari dalam dialog aman dan dialog tidak
+  // terbuka lagi saat kembali (back).
+  useLayoutEffect(() => {
+    const d = ref.current;
+    return () => {
+      if (d?.open) {
+        d.close();
+        onCloseRef.current();
+      }
+    };
+  }, []);
   return (
     <dialog
       ref={ref}

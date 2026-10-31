@@ -18,12 +18,14 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/kyc"
 	"github.com/gavinadlan/racego/backend/internal/notify"
+	"github.com/gavinadlan/racego/backend/internal/participant"
 	"github.com/gavinadlan/racego/backend/internal/partner"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/secretbox"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
+	"github.com/gavinadlan/racego/backend/internal/turnstile"
 	"github.com/gavinadlan/racego/backend/internal/upload"
 )
 
@@ -39,6 +41,8 @@ type Deps struct {
 	KYCBox *secretbox.Box // kunci enkripsi dokumen & data sensitif verifikasi mitra
 	// Finance: keuangan mitra (pencairan, refund, laporan). nil = dibuat dari Cfg (DISBURSE_MODE).
 	Finance *finance.Service
+	// Turnstile: verifier anti-bot. nil = dibuat dari Cfg.Turnstile (kunci kosong = mati).
+	Turnstile *turnstile.Verifier
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -48,6 +52,12 @@ func NewRouter(d Deps) http.Handler {
 		co.SetQueue(d.Queue)
 	}
 	waiting := queue.NewHandler(d.DB, d.Queue)
+	// Turnstile (anti-bot): kunci kosong = mati, permintaan lolos tanpa token seperti sebelumnya.
+	captcha := d.Turnstile
+	if captcha == nil {
+		captcha = turnstile.New(d.Cfg.Turnstile.SecretKey, d.Cfg.Turnstile.VerifyURL)
+	}
+	waiting.SetTurnstile(captcha)
 	pay := payment.NewProcessor(d.DB, d.Cfg.SigningKey())
 	if !d.Cfg.MidtransMock() {
 		co.SetRefresher(payment.NewReconciler(pay, d.Cfg.MidtransServerKey, d.Cfg.MidtransIsProduction))
@@ -55,9 +65,11 @@ func NewRouter(d Deps) http.Handler {
 	tickets := ticket.NewHandler(d.DB, d.Signer)
 	sessions := auth.NewSessionStore(d.DB)
 	authH := auth.NewHandler(d.DB, auth.NewOTPStore(d.Redis), sessions, d.Mailer, d.Cfg.IsDev())
+	authH.SetTurnstile(captcha)
 	portal := partner.NewHandler(d.DB, d.Inv, d.Cfg.AutoVerifyOrgs)
 	uploads := upload.NewHandler(upload.Disk{Dir: d.Cfg.UploadDir})
 	verif := kyc.NewHandler(d.DB, d.Redis, d.KYCBox, d.Cfg.KYCDir, d.Cfg.AutoVerifyOrgs)
+	people := participant.NewHandler(d.DB, d.Redis)
 	fin := d.Finance
 	if fin == nil {
 		fin = finance.FromConfig(d.DB, d.KYCBox, d.Cfg)
@@ -128,7 +140,12 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleRPCStaff))
 				r.Post("/events/{eventID}/scan", tickets.Scan)
 				r.Get("/events/{eventID}/tickets", tickets.EventTickets)
+				// Ringkasan peserta tanpa data pribadi (jumlah per kategori/jersey/status): juga untuk staf RPC.
+				r.Get("/events/{eventID}/participants/summary", people.Summary)
 			})
+			// Daftar & unduhan peserta (data pribadi): hanya owner & admin.
+			r.With(editors).Get("/events/{eventID}/participants", people.List)
+			r.With(editors).Get("/events/{eventID}/participants.csv", people.CSV)
 			r.Group(func(r chi.Router) {
 				r.Use(editors)
 				r.Patch("/profile", portal.UpdateProfile)
@@ -214,6 +231,8 @@ func cors(origin string) func(http.Handler) http.Handler {
 			h.Set("Access-Control-Allow-Credentials", "true")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key, X-User-ID, X-Queue-Pass")
+			// Nama berkas unduhan CSV dibaca frontend dari header ini (development: beda origin).
+			h.Set("Access-Control-Expose-Headers", "Content-Disposition")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return

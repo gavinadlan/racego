@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -888,8 +890,29 @@ func TestFinanceReports(t *testing.T) {
 		if path == "/reports/sales.csv" && (!strings.Contains(body, `"'=cmd|' /C calc'!A0"`) && !strings.Contains(body, `'=cmd|' /C calc'!A0`)) {
 			t.Fatalf("injeksi rumus tidak dinetralkan: %s", body)
 		}
-		if path == "/reports/ledger.csv" && (!strings.Contains(body, ";'-674560;") || strings.Contains(body, ";-")) {
-			t.Fatalf("angka negatif harus berawalan ': %s", body)
+		// Tugas 07 (perilaku berubah): sel angka ditulis apa adanya termasuk negatif, tanpa awalan '.
+		// Dulu ";'-674560;" (Excel membacanya teks). Jumlah kolom angka harus sama dengan saldo di layar.
+		if path == "/reports/ledger.csv" {
+			if !strings.Contains(body, ";-674560;") || strings.Contains(body, ";'-674560;") {
+				t.Fatalf("angka negatif harus utuh: %s", body)
+			}
+			cr := csv.NewReader(strings.NewReader(strings.TrimPrefix(body, "\uFEFF")))
+			cr.Comma = ';'
+			recs, err := cr.ReadAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sum int64
+			for _, rec := range recs[1:] {
+				v, err := strconv.ParseInt(rec[3], 10, 64)
+				if err != nil {
+					t.Fatalf("kolom Jumlah bukan angka: %q", rec[3])
+				}
+				sum += v
+			}
+			if b := e.balances(orgID); sum != b.Held+b.Available+b.InProcess {
+				t.Fatalf("jumlah CSV %d ≠ saldo %+v", sum, b)
+			}
 		}
 	}
 	var n int

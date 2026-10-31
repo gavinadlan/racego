@@ -275,14 +275,14 @@ func TestMidtransRefunder(t *testing.T) {
 }
 
 func TestCSVSafeAndBOM(t *testing.T) {
-	for in, want := range map[string]string{"=cmd|' /C calc'!A0": "'=cmd|' /C calc'!A0", "+1": "'+1", "-1": "'-1", "@x": "'@x",
-		"\tx": "'\tx", "\rx": "'\rx", "aman": "aman", "": ""} {
-		if got := CSVSafe(in); got != want {
-			t.Fatalf("CSVSafe(%q) = %q", in, got)
-		}
+	// Tugas 07: sanitasi pindah ke csvx (tes lengkap di sana). Sel angka (int64) kini ditulis apa adanya,
+	// termasuk negatif; dulu "-5000" ikut diberi awalan ' sehingga Excel membacanya sebagai teks.
+	var buf bytes.Buffer
+	if err := writeCSV(&buf, []string{"a", "b", "c"}, [][]any{{"=1+1", "x;y", int64(-5000)}}); err != nil {
+		t.Fatal(err)
 	}
-	out := string(writeCSV([]string{"a", "b"}, [][]string{{"=1+1", "x;y"}}))
-	if !strings.HasPrefix(out, "\uFEFFa;b\r\n") || !strings.Contains(out, `'=1+1;"x;y"`) {
+	out := buf.String()
+	if !strings.HasPrefix(out, "\uFEFFa;b;c\r\n") || !strings.Contains(out, `'=1+1;"x;y";-5000`) {
 		t.Fatalf("csv: %q", out)
 	}
 	if rupiah(1234567) != "Rp1.234.567" || rupiah(-5000) != "-Rp5.000" || rupiah(0) != "Rp0" {

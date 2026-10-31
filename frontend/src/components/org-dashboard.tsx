@@ -87,6 +87,11 @@ function EventsTab({ role }: { role: Role }) {
                   </Link>
                 )}
                 {scanner && e.status !== "draft" && (
+                  <Link href={`/org/${org}/events/${e.id}/peserta`} className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold hover:border-asphalt" aria-label={`Peserta ${e.name}`}>
+                    Peserta
+                  </Link>
+                )}
+                {scanner && e.status !== "draft" && (
                   <Link href={`/org/${org}/events/${e.id}/scan`} className="rounded-md bg-hivis px-3 py-1.5 text-xs font-semibold text-asphalt">
                     Scan race pack
                   </Link>

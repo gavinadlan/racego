@@ -7,6 +7,7 @@ import { PinHoles } from "./bib";
 import { BigCountdown, useNow } from "./clock";
 import { LoginLink } from "./login-link";
 import { useSession } from "./session";
+import { turnstileEnabled, useTurnstile } from "./turnstile";
 import { btnGhost, btnPrimary } from "./ui";
 
 // Pass disimpan per event di sessionStorage (hilang saat tab ditutup, tidak terbawa ke tab lain).
@@ -52,6 +53,7 @@ export function WaitingRoom({ event, onPass, resetKey }: { event: EventDetail; o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [announce, setAnnounce] = useState("");
+  const captcha = useTurnstile(); // satu tantangan per sesi antrean (hanya saat bergabung)
   const announced = useRef<{ state: string; position: number | null } | null>(null);
   // Jadwal polling berikutnya: dari poll_after_ms server (sudah berjitter), atau jeda coba lagi.
   const [poll, setPoll] = useState<{ ms: number; seq: number } | null>(null);
@@ -131,11 +133,12 @@ export function WaitingRoom({ event, onPass, resetKey }: { event: EventDetail; o
     setBusy(true);
     setError(null);
     try {
-      accept(await joinQueue(event.id), Date.now());
+      accept(await joinQueue(event.id, captcha.token), Date.now());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Gagal masuk antrian");
     } finally {
       setBusy(false);
+      if (turnstileEnabled) captcha.reset();
     }
   }
 
@@ -200,8 +203,9 @@ export function WaitingRoom({ event, onPass, resetKey }: { event: EventDetail; o
         ) : (
           <p className="mt-4">{beforeSale ? "Lobi sudah dibuka. Masuk sekarang supaya ikut diundi saat jam buka." : "Ambil nomor antrian untuk mendaftar."}</p>
         )}
-        <button className={`${btnPrimary} mt-4 w-full sm:w-auto`} disabled={busy} onClick={join}>
-          {busy ? "Memproses…" : snap?.lost ? "Bergabung lagi" : beforeSale ? "Masuk lobi" : "Masuk antrian"}
+        {turnstileEnabled && <div className="mt-4">{captcha.widget("dark")}</div>}
+        <button className={`${btnPrimary} mt-4 w-full sm:w-auto`} disabled={busy || !captcha.ready} onClick={join}>
+          {busy ? "Memproses…" : !captcha.ready ? "Memeriksa…" : snap?.lost ? "Bergabung lagi" : beforeSale ? "Masuk lobi" : "Masuk antrian"}
         </button>
       </>
     );

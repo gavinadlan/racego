@@ -19,6 +19,7 @@ import (
 
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/notify"
+	"github.com/gavinadlan/racego/backend/internal/turnstile"
 )
 
 type Handler struct {
@@ -26,8 +27,12 @@ type Handler struct {
 	otps     *OTPStore
 	sessions *SessionStore
 	mailer   *notify.Mailer
-	devMode  bool // cookie tanpa Secure (localhost http) & kode OTP dicatat ke log
+	devMode  bool                // cookie tanpa Secure (localhost http) & kode OTP dicatat ke log
+	captcha  *turnstile.Verifier // nil = Turnstile mati
 }
+
+// SetTurnstile mewajibkan token Turnstile di permintaan kode OTP (nil = mati).
+func (h *Handler) SetTurnstile(v *turnstile.Verifier) { h.captcha = v }
 
 func NewHandler(db *pgxpool.Pool, otps *OTPStore, sessions *SessionStore, mailer *notify.Mailer, devMode bool) *Handler {
 	return &Handler{db: db, otps: otps, sessions: sessions, mailer: mailer, devMode: devMode}
@@ -37,7 +42,8 @@ func NewHandler(db *pgxpool.Pool, otps *OTPStore, sessions *SessionStore, mailer
 // Selalu sukses untuk email valid, tidak membocorkan apakah akunnya sudah ada.
 func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Email string `json:"email"`
+		Email          string `json:"email"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if !httpx.Decode(w, r, &in) {
 		return
@@ -49,6 +55,10 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.otps.LimitIP(r.Context(), ClientIP(r)); err != nil {
 		h.otpError(w, r, err)
+		return
+	}
+	// Setelah batas per IP: banjir permintaan berhenti di Redis, tidak menjadi panggilan ke Cloudflare.
+	if !h.captcha.Check(w, r, in.TurnstileToken, ClientIP(r)) {
 		return
 	}
 	code, err := h.otps.Issue(r.Context(), email)

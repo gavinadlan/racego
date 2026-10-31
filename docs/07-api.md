@@ -18,6 +18,8 @@ Error validasi form (422) membawa pesan per kolom; kategori dalam satu kiriman m
 Autentikasi: **cookie sesi** `racego_session` (HttpOnly, `SameSite=Lax`, `Path=/`, host-only, 30 hari, `Secure` di luar development) yang di-set oleh `POST /v1/auth/otp/verify`. Frontend memanggil API dengan `fetch(..., { credentials: "include" })`; CORS hanya mengizinkan origin `FRONTEND_URL` dengan `Access-Control-Allow-Credentials: true`.
 
 - **CSRF**: request `POST/PUT/PATCH/DELETE` yang membawa header `Origin` selain `FRONTEND_URL` ditolak 403 `bad_origin` (webhook server-ke-server tidak mengirim `Origin`).
+- **Anti-bot (opsional)**: bila Turnstile aktif (`TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`), `POST /v1/auth/otp/request` dan `POST /v1/events/{eventID}/queue` (saat mulai mengantre) wajib membawa `"turnstile_token"`. Gagal → 422 `{"error":"captcha_failed","message":"Verifikasi keamanan gagal, coba lagi","fields":{"turnstile_token":"…"}}`; Cloudflare tidak terjangkau/timeout → 503 `captcha_unavailable` (fail closed). Pembatas laju yang sudah ada dicek lebih dulu. Fitur mati = field diabaikan.
+- **Unduhan**: `Content-Disposition` diekspos lewat `Access-Control-Expose-Headers` agar frontend (beda origin di development) bisa membaca nama berkas.
 - **Development saja**: request tanpa cookie sesi valid boleh membawa header `X-User-ID: <uuid user>` (akun contoh). Di luar `APP_ENV=development` header ini diabaikan total.
 
 ## Login (email + kode OTP)
@@ -26,7 +28,7 @@ Tanpa password; akun dibuat otomatis saat verifikasi pertama (daftar = masuk).
 
 | Method | Path | Body | Respons |
 | --- | --- | --- | --- |
-| POST | `/v1/auth/otp/request` | `{"email"}` | 200 `{"ok":true,"resend_after":60}` (juga untuk email yang belum terdaftar) · 422 `invalid_email` · 429 `too_many_requests` + `retry_after` (detik) · 502 `mail_failed` |
+| POST | `/v1/auth/otp/request` | `{"email","turnstile_token"?}` | 200 `{"ok":true,"resend_after":60}` (juga untuk email yang belum terdaftar) · 422 `invalid_email` / `captcha_failed` · 429 `too_many_requests` + `retry_after` (detik) · 502 `mail_failed` · 503 `captcha_unavailable` |
 | POST | `/v1/auth/otp/verify` | `{"email","code"}` | 200 + `Set-Cookie`; body = `GET /v1/me` + `"is_new": bool` · 400 `otp_invalid` + `remaining` · 410 `otp_expired` (kedaluwarsa / sudah dipakai) · 429 `too_many_attempts` (5× salah, kode hangus) |
 | POST | `/v1/auth/logout` | – | 204, sesi di DB & cookie dihapus (tetap 204 walau belum login) |
 | GET | `/v1/auth/session` | – | 200 `{"me": <sama dengan GET /v1/me>}`, atau `{"me": null}` bila belum masuk. Dipakai frontend di setiap halaman, jadi pengunjung anonim tidak memicu 401 di konsol browser |
@@ -57,7 +59,7 @@ Aturan kode: 6 digit, berlaku 10 menit, sekali pakai, maks 5 percobaan salah. Ki
 | POST | `/v1/orders` | header `Idempotency-Key`; `{"category_id","reservation_id","participants":[…]}` | 201 `order_id`, `snap_token`, `redirect_url`, `mock` · 410 `reservation_expired` · 409 `reservation_used` · 422 validasi peserta |
 | GET | `/v1/orders/{orderID}` | | status order (untuk polling) + `qty` + `tickets_issued` (tiket yang sudah terbit; worker menerbitkannya beberapa detik setelah lunas); bila belum lunas & bukan mock, sekalian cek status ke Midtrans |
 | GET | `/v1/me/tickets` | | tiket + `qr_token` + BIB + `order_id` |
-| POST | `/v1/events/{eventID}/queue` | | Masuk antrian virtual. 201 baru, 200 sudah di antrian (posisi tidak berubah); body = status antrian · 409 `queue_not_open` (sebelum lobi / penjualan sudah ditutup) · 404 `event_not_found` (tidak ada, belum terbit, atau tanpa antrian) · 429 `too_many_requests` (20/menit per akun, 300/menit per IP) |
+| POST | `/v1/events/{eventID}/queue` | `{"turnstile_token"}` hanya bila Turnstile aktif dan user belum di lobi/antrean/memegang pass | Masuk antrian virtual. 422 `captcha_failed` / 503 `captcha_unavailable` (lihat Anti-bot). 201 baru, 200 sudah di antrian (posisi tidak berubah); body = status antrian · 409 `queue_not_open` (sebelum lobi / penjualan sudah ditutup) · 404 `event_not_found` (tidak ada, belum terbit, atau tanpa antrian) · 429 `too_many_requests` (20/menit per akun, 300/menit per IP) |
 | GET | `/v1/events/{eventID}/queue/me` | | Status antrian + tanda hidup (panggil sesuai `poll_after_ms`). 429 `too_many_requests` + `retry_after` bila < 1 detik sejak panggilan sebelumnya |
 | DELETE | `/v1/events/{eventID}/queue/me` | | 204; keluar antrian dan pass dicabut |
 | POST | `/v1/orgs` | `{"name","slug"?,"city","description","instagram"?,"website"?}` | 201 `slug`, `name`, `kyc_status` (pembuat jadi owner) · 422 `validation` (nama 3–80, slug 3–40 `a-z0-9-` & bukan nama route frontend, instagram tanpa `@`, website `https://`) · 429 `too_many_orgs` (maks 3 per akun) |
@@ -106,6 +108,9 @@ Objek peserta:
 | PATCH / DELETE | `/v1/org/{org}/members/{userID}` | owner | ubah peran (termasuk `owner`) / hapus; 409 `self_change` untuk diri sendiri, `last_owner` bila owner terakhir |
 | POST | `/v1/org/{org}/events/{eventID}/scan` | owner, admin, rpc_staff | `{"token": "v1…"}` atau `{"ticket_id": "…"}`, opsional `picked_up_by` |
 | GET | `/v1/org/{org}/events/{eventID}/tickets?q=` | owner, admin, rpc_staff | statistik + pencarian nama / BIB / 4 digit akhir NIK |
+| GET | `/v1/org/{org}/events/{eventID}/participants/summary` | owner, admin, rpc_staff | tanpa data pribadi: `total`, `by_category` (`key` kode, `label` nama, `id`, `count`; semua kategori event), `by_jersey` (tiket berlaku), `by_status` |
+| GET | `/v1/org/{org}/events/{eventID}/participants?q=&category=&status=&page=` | owner, admin | 50 per halaman: `ticket_id`, `bib`, `name`, `email`, `category`, `jersey_size`, `gender`, `birth_date`, `id_number` (**selalu** `••••1234`), `emergency_name`, `emergency_phone`, `status` (`issued`/`collected`/`refunded`/`cancelled`), `issued_at`, `collected_at`. `q` = nama/email (sebagian) atau BIB (persis). 422 `validation` (`category`, `status`, `q` > 100) |
+| GET | `/v1/org/{org}/events/{eventID}/participants.csv?q=&category=&status=` | owner, admin | CSV di-stream per baris (UTF-8 BOM, `;`, sel teks disanitasi, angka tetap angka): BIB, nama, email, kategori, ukuran jersey, gender, tanggal lahir, nomor identitas tersamar, kontak darurat + telepon, status tiket, waktu terbit/ambil (WIB). Tanpa data pembayaran. `Content-Disposition: attachment; filename="peserta-<slug-event>-<YYYYMMDD>.csv"`, `Cache-Control: no-store`. Tercatat `participants.download` (filter, `rows`; tanpa isi). 429 `too_many_requests` (10 unduhan/menit/akun) |
 
 Bukan anggota → 404 `org_not_found`. Peran tidak cukup → 403 `forbidden`. Event/kategori milik org lain → 404.
 
@@ -123,7 +128,7 @@ Bukan anggota → 404 `org_not_found`. Peran tidak cukup → 403 `forbidden`. Ev
 | POST | `/v1/org/{org}/orders/{id}/refund` | `{"reason"}` 10–500 karakter → 201 refund `requested` · 404 order org lain · 409 `already_refunded` / `order_not_refundable` |
 | GET | `/v1/org/{org}/refunds?page=` | status refund org |
 | GET | `/v1/org/{org}/reports/sales` | ringkasan per event (`orders_paid`, `orders_refunded`, `gross`, `platform_fee`, `pg_fee`, `refunds`, `net`) |
-| GET | `/v1/org/{org}/reports/sales.csv`, `/reports/ledger.csv` | CSV UTF-8 BOM, pemisah `;`, aman injeksi rumus; tercatat `report.download` |
+| GET | `/v1/org/{org}/reports/sales.csv`, `/reports/ledger.csv` | CSV UTF-8 BOM, pemisah `;`; kolom rupiah/jumlah adalah sel angka (negatif ditulis `-345560`, terbaca angka di Excel), hanya sel teks yang dinetralkan dari injeksi rumus; tercatat `report.download` |
 
 ### Verifikasi mitra (owner saja)
 

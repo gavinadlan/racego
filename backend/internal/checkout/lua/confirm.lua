@@ -3,6 +3,7 @@
 -- KEYS[1] stok    KEYS[2] jumlah milik user    KEYS[3] indeks hold    KEYS[4] detail hold
 -- KEYS[5] penanda sudah dikonfirmasi            {cat:<id>}:confirmed:<rid>
 -- ARGV[1] id reservasi    ARGV[2] qty    ARGV[3] TTL penanda (detik)
+-- ARGV[4] TTL minimal key jumlah milik user (detik), hanya bila key baru dibuat tanpa TTL
 --
 -- Hasil:
 --  1 hold masih aktif → slot dikunci (kasus normal)
@@ -22,6 +23,9 @@ local stock = tonumber(redis.call('GET', KEYS[1]) or '0')
 if stock >= qty then
   redis.call('DECRBY', KEYS[1], qty)
   redis.call('INCRBY', KEYS[2], qty)
+  if redis.call('TTL', KEYS[2]) == -1 then
+    redis.call('EXPIRE', KEYS[2], ARGV[4])
+  end
   redis.call('SET', KEYS[5], '1', 'EX', ARGV[3])
   return 2
 end

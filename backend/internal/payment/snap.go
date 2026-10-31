@@ -86,7 +86,12 @@ func (s *httpSnap) CreateTransaction(ctx context.Context, req SnapRequest) (Snap
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return SnapResult{}, fmt.Errorf("snap status %d: %s", resp.StatusCode, raw)
+		// Body error Snap berupa error_messages; dipotong agar log tidak menampung respons utuh.
+		msg := string(raw)
+		if len(msg) > 300 {
+			msg = msg[:300] + "…"
+		}
+		return SnapResult{}, fmt.Errorf("snap status %d: %s", resp.StatusCode, msg)
 	}
 	var out SnapResult
 	if err := json.Unmarshal(raw, &out); err != nil {

@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getDevUserId, requestOtp, safeNext, setDevUserId, verifyOtp } from "@/lib/api";
 import { useSession } from "./session";
+import { turnstileEnabled, useTurnstile } from "./turnstile";
 import { btnGhost, btnPrimary, ErrorBox, inputCls, Loading, PageTitle } from "./ui";
 
 /** Masuk = daftar: email → kode 6 digit dari email → masuk. */
@@ -20,6 +21,7 @@ export function LoginForm() {
   const [now, setNow] = useState(() => Date.now());
   const loggingIn = useRef(false);
   const codeInput = useRef<HTMLInputElement>(null);
+  const captcha = useTurnstile();
 
   // Sudah masuk (mis. membuka /masuk lagi): langsung ke tujuan.
   useEffect(() => {
@@ -43,7 +45,7 @@ export function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      const res = await requestOtp(email);
+      const res = await requestOtp(email, captcha.token);
       holdResend(res.resend_after);
       setCode("");
       setStep("code");
@@ -53,6 +55,7 @@ export function LoginForm() {
       setError(err instanceof ApiError ? err.message : "Gagal mengirim kode");
     } finally {
       setBusy(false);
+      if (turnstileEnabled) captcha.reset(); // token sekali pakai: siapkan yang baru untuk kirim ulang
     }
   }
 
@@ -99,9 +102,10 @@ export function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </label>
+            {captcha.widget()}
             {error && <ErrorBox message={error} />}
-            <button type="submit" className={`${btnPrimary} w-full`} disabled={busy || !email}>
-              {busy ? "Mengirim…" : "Kirim kode"}
+            <button type="submit" className={`${btnPrimary} w-full`} disabled={busy || !email || !captcha.ready}>
+              {busy ? "Mengirim…" : captcha.ready ? "Kirim kode" : "Memeriksa…"}
             </button>
           </form>
         ) : (
@@ -150,10 +154,12 @@ export function LoginForm() {
               >
                 Ganti email
               </button>
-              <button type="button" className={btnGhost} disabled={busy || waiting > 0} onClick={() => send()}>
-                {waiting > 0 ? `Kirim ulang (${waiting} dtk)` : "Kirim ulang"}
+              <button type="button" className={btnGhost} disabled={busy || waiting > 0 || !captcha.ready} onClick={() => send()}>
+                {waiting > 0 ? `Kirim ulang (${waiting} dtk)` : captcha.ready ? "Kirim ulang" : "Memeriksa…"}
               </button>
             </div>
+            {/* Kirim ulang juga butuh token baru; widget hanya tampil setelah jeda kirim ulang selesai. */}
+            {waiting === 0 && captcha.widget()}
           </form>
         )}
       </div>

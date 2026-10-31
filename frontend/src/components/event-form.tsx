@@ -287,6 +287,7 @@ function EventForm({
     try {
       if (action === "delete") {
         await deleteEvent(org, event.id);
+        setDialog(null); // tutup dulu sebelum pindah halaman (lihat ConfirmDialog)
         router.replace(`/org/${org}`);
         return;
       }

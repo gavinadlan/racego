@@ -92,6 +92,8 @@ cp .env.prod.example .env.prod
 scripts/gen-secrets.sh
 ```
 
+Server tidak perlu Go atau Node: image dibangun di Docker (`golang:1.27.3-alpine`, sama dengan `toolchain` di `backend/go.mod` dan CI; Node 22 untuk frontend).
+
 `gen-secrets.sh` mengisi `POSTGRES_USER`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QUEUE_SECRET` (kunci pass antrian virtual), dan `QR_PRIVATE_KEY` dengan nilai acak, tanpa mencetaknya. Untuk `.env.prod` lama yang belum punya `QUEUE_SECRET`, cukup jalankan skrip ini lagi: hanya yang kosong yang diisi. Nilai yang sudah terisi tidak akan ditimpa tanpa konfirmasi.
 
 > **Kunci QR jangan pernah berubah.** `QR_PRIVATE_KEY` menandatangani QR setiap tiket. Kalau diganti, semua tiket yang sudah terbit ditolak scanner. Salin `.env.prod` (minimal kunci ini) ke pengelola password **sekarang**. Kehilangan file ini sama dengan kehilangan tiket.
@@ -143,6 +145,18 @@ https://SITE_ADDRESS/v1/webhooks/midtrans
 ```
 
 Uji: beli tiket, bayar dengan simulator sandbox Midtrans, lalu pastikan tiket muncul di **Tiket saya**. Kalau webhook tidak sampai, order tetap terbayar karena halaman order dan worker (tiap menit) mengecek status langsung ke Midtrans. Webhook hanya mempercepat.
+
+## 4b. Opsional: anti-bot Cloudflare Turnstile
+
+Turnstile (gratis) menyulitkan skrip yang membanjiri permintaan kode masuk dan pendaftaran antrean. **Tidak** menghentikan bot canggih atau satu orang dengan banyak akun; checkout dan pembayaran tidak pernah ditantang.
+
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → **Turnstile** → *Add widget*: hostname = `SITE_ADDRESS`, mode **Managed**.
+2. Salin *Site Key* dan *Secret Key* ke `TURNSTILE_SITE_KEY` dan `TURNSTILE_SECRET_KEY` di `.env.prod` (secret jangan pernah di-commit), lalu `make prod-up` (site key tertanam ke frontend saat build).
+3. Uji: halaman **Masuk** menampilkan widget dan tombol baru aktif setelah verifikasi.
+
+Hanya satu kunci terisi → API menolak start. Bila Cloudflare tidak terjangkau, permintaan kode/antrean ditolak sementara (503, *fail closed*) dan dicatat di log tanpa token. Kosongkan keduanya untuk mematikan.
+
+**CSP**: Caddy belum memasang `Content-Security-Policy`, jadi tidak ada yang perlu diubah. Saat CSP dipasang (roadmap), izinkan `https://challenges.cloudflare.com` di `script-src` dan `frame-src` ([panduan Cloudflare](https://developers.cloudflare.com/turnstile/reference/content-security-policy/)).
 
 ## 5. Operasional sehari-hari
 
@@ -211,6 +225,7 @@ Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worke
 - [ ] Password Postgres/Redis acak dari `gen-secrets.sh`; `.env.prod` hanya bisa dibaca pemiliknya (`ls -l .env.prod` → `-rw-------`).
 - [ ] Hanya 22/80/443 terbuka: dari laptop, `nc -zv IP_SERVER 5432` dan `nc -zv IP_SERVER 6379` harus gagal.
 - [ ] `PROXY_MODE` dan `TRUSTED_PROXY_HOPS` sesuai topologi (tabel di bawah), lalu `scripts/check-ip-spoof.sh https://SITE_ADDRESS emailmu@gmail.com` → LULUS. Skrip ini mengirim sampai 20 email kode ke `emailmu+ipcekN@…` dan memakai jatah kode IP-mu selama 1 jam.
+- [ ] Turnstile sesuai niat: kedua kunci terisi (widget tampil di **Masuk**) atau keduanya kosong.
 - [ ] Update OS otomatis aktif, login SSH hanya dengan kunci.
 - [ ] Backup cron terpasang, dan satu restore sudah pernah dicoba.
 

@@ -226,8 +226,9 @@ export type ScanResult = {
 
 // ===== Login (email + kode OTP) =====
 
-export const requestOtp = (email: string) =>
-  apiFetch<{ ok: true; resend_after: number }>("/v1/auth/otp/request", { method: "POST", body: { email } });
+// turnstileToken: hanya bila Turnstile aktif (NEXT_PUBLIC_TURNSTILE_SITE_KEY); null = tidak dikirim.
+export const requestOtp = (email: string, turnstileToken: string | null = null) =>
+  apiFetch<{ ok: true; resend_after: number }>("/v1/auth/otp/request", { method: "POST", body: turnstileToken ? { email, turnstile_token: turnstileToken } : { email } });
 
 export const verifyOtp = (email: string, code: string) =>
   apiFetch<Me & { is_new: boolean }>("/v1/auth/otp/verify", { method: "POST", body: { email, code } });
@@ -377,7 +378,8 @@ export type QueueState = {
 };
 
 const queuePath = (eventId: string) => `/v1/events/${eventId}/queue`;
-export const joinQueue = (eventId: string) => apiFetch<QueueState>(queuePath(eventId), { method: "POST" });
+export const joinQueue = (eventId: string, turnstileToken: string | null = null) =>
+  apiFetch<QueueState>(queuePath(eventId), { method: "POST", body: turnstileToken ? { turnstile_token: turnstileToken } : undefined });
 export const queueStatus = (eventId: string) => apiFetch<QueueState>(`${queuePath(eventId)}/me`);
 export const leaveQueue = (eventId: string) => apiFetch<void>(`${queuePath(eventId)}/me`, { method: "DELETE" });
 
@@ -698,3 +700,23 @@ export const createRefund = (orderId: string, reason: string) =>
   apiFetch<Refund>("/v1/admin/refunds", { method: "POST", body: { order_id: orderId, reason } });
 export const refundAction = (id: string, action: "approve" | "reject" | "mark-done", body?: { reason?: string; reference?: string }) =>
   apiFetch<Refund>(`/v1/admin/refunds/${id}/${action}`, { method: "POST", body });
+
+// Peserta per event (portal mitra). Nomor identitas sudah tersamar dari server (••••1234).
+export type EventParticipant = {
+  ticket_id: string;
+  bib: string;
+  name: string;
+  email: string;
+  category: string;
+  jersey_size: string;
+  gender: string | null;
+  birth_date: string | null;
+  id_number: string;
+  emergency_name: string;
+  emergency_phone: string;
+  status: "issued" | "collected" | "refunded" | "cancelled";
+  issued_at: string;
+  collected_at: string | null;
+};
+type Count = { key: string; label?: string; id?: string; count: number };
+export type ParticipantSummary = { total: number; by_category: (Count & { id: string; label: string })[]; by_jersey: Count[]; by_status: Count[] };

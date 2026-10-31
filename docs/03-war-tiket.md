@@ -51,7 +51,8 @@ Mitra mencentang **Aktifkan antrian virtual** di form event (owner/admin; terkun
 5. **Pass dilepas** saat reservasi pertama berhasil (pembeli punya 15 menit untuk checkout; **untuk kategori lain ia perlu antri lagi**), saat kedaluwarsa, atau saat keluar antrian (`DELETE`).
 6. **Akhir**: semua kategori stok 0 dan tidak ada hold → `sold_out`; penjualan ditutup → `closed`. Semua yang menunggu melihat status itu pada polling berikutnya, dan key antrian event itu terhapus sendiri 10 menit kemudian. Bila mitra menambah kuota, antrian dibuka lagi.
 7. **Polling dengan jitter dari server**: `poll_after_ms` = 2,5 detik di depan antrian, naik 10 ms per orang di depan sampai 15 detik, ±20% acak. Di lobi 15 detik; polling pertama setelah jam buka disebar 0,5–5 detik. `GET /queue/me` minimal 1 detik sekali per akun (429 `retry_after`); join/keluar dibatasi 20/menit per akun dan 300/menit per IP (`internal/ratelimit`, pembatas yang sama dengan OTP).
-8. **Waktu dari server**: setiap status membawa `server_time`; hitung mundur di browser dikoreksi dengan selisih jam server.
+8. **Anti-bot (opsional)**: bila Turnstile aktif (`TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`), `POST /queue` membutuhkan token Turnstile hanya saat memulai sesi antrean (user belum di lobi/antrean/memegang pass). Join ulang setelah muat ulang halaman, polling status, dan reservasi tidak ditantang. Pembatas join (20/menit per akun, 300/menit per IP) dicek sebelum verifikasi. Kunci kosong = perilaku sama persis seperti sebelumnya.
+9. **Waktu dari server**: setiap status membawa `server_time`; hitung mundur di browser dikoreksi dengan selisih jam server.
 
 Bila data Redis hilang total (meski `appendonly yes`), peserta mendapat `not_in_queue` dan halaman event mengajak bergabung lagi (di belakang); pass lama ditolak karena tidak ada lagi di himpunan pass aktif.
 
@@ -65,7 +66,7 @@ Reservasi Redis sendiri sudah murah (3.000 request ke 200 slot di laptop selesai
 
 Batas yang jujur:
 
-- **Tidak mencegah akun ganda atau bot.** Satu orang dengan 50 akun mendapat 50 undian. Turnstile, verifikasi NIK, dan batas per identitas belum dibuat (roadmap).
+- **Tidak mencegah akun ganda atau bot canggih.** Satu orang dengan 50 akun mendapat 50 undian. Turnstile (opsional) hanya menyulitkan skrip sederhana yang membanjiri pendaftaran antrean; verifikasi NIK dan batas per identitas belum dibuat (roadmap).
 - Halaman tunggu tetap dilayani API dan Next.js (belum dari CDN).
 - Yang dipanggil saat stok sebentar lagi habis bisa mendapat "Habis" saat menekan Daftar: pemanggilan baru berhenti setelah stok benar-benar 0, dan pembeli butuh beberapa detik untuk melihat gilirannya.
 - Saat stok 0 tapi masih ada hold, sisa antrian menunggu tanpa kepastian sampai hold dibayar (tiket habis) atau kedaluwarsa (slot kembali).

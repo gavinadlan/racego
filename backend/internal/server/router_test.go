@@ -29,3 +29,15 @@ func TestSimulateRouteOnlyWithoutMidtrans(t *testing.T) {
 		}
 	}
 }
+
+// Frontend (beda origin di development) membaca nama berkas unduhan dari Content-Disposition.
+func TestCORSExposesContentDisposition(t *testing.T) {
+	cfg := config.Config{Env: "development", FrontendURL: "http://localhost:3000"}
+	req := httptest.NewRequest(http.MethodOptions, "/v1/events", nil)
+	req.Header.Set("Origin", cfg.FrontendURL)
+	rec := httptest.NewRecorder()
+	NewRouter(Deps{Cfg: cfg}).ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "Content-Disposition" {
+		t.Fatalf("Access-Control-Expose-Headers = %q", got)
+	}
+}

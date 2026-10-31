@@ -19,6 +19,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/ratelimit"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
+	"github.com/gavinadlan/racego/backend/internal/turnstile"
 )
 
 const (
@@ -33,7 +34,12 @@ type Handler struct {
 
 	cacheMu sync.Mutex
 	cache   map[uuid.UUID]cachedEvent
+
+	captcha *turnstile.Verifier // nil = Turnstile mati
 }
+
+// SetTurnstile mewajibkan token Turnstile saat mulai mengantre (nil = mati).
+func (h *Handler) SetTurnstile(v *turnstile.Verifier) { h.captcha = v }
 
 type cachedEvent struct {
 	ev      Event // published/closed, mitra terverifikasi, antrian aktif
@@ -147,6 +153,9 @@ func (h *Handler) Join(w http.ResponseWriter, r *http.Request) {
 	if h.limitJoin(w, r, userID.String()) {
 		return
 	}
+	if h.captcha != nil && !h.joinChallenge(w, r, ev, userID.String(), now) {
+		return
+	}
 	st, created, err := h.q.Join(r.Context(), ev, userID.String(), now)
 	if err != nil {
 		httpx.Internal(w, r, err)
@@ -157,6 +166,27 @@ func (h *Handler) Join(w http.ResponseWriter, r *http.Request) {
 		code = http.StatusCreated
 	}
 	httpx.JSON(w, code, st)
+}
+
+// joinChallenge: satu tantangan Turnstile per sesi antrean. Pengguna yang sudah di lobi/antrean atau
+// memegang pass (join ulang setelah muat ulang halaman) tidak ditantang lagi; polling tidak pernah.
+// false = respons sudah ditulis.
+func (h *Handler) joinChallenge(w http.ResponseWriter, r *http.Request, ev Event, userID string, now time.Time) bool {
+	st, err := h.q.Status(r.Context(), ev, userID, now)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return false
+	}
+	if st.State == StateLobby || st.State == StateWaiting || st.State == StateAdmitted {
+		return true
+	}
+	var in struct {
+		TurnstileToken string `json:"turnstile_token"`
+	}
+	if r.ContentLength != 0 && !httpx.Decode(w, r, &in) {
+		return false
+	}
+	return h.captcha.Check(w, r, in.TurnstileToken, auth.ClientIP(r))
 }
 
 var wib = time.FixedZone("WIB", 7*60*60)

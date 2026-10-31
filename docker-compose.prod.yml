@@ -115,6 +115,9 @@ services:
       # terpisah dari backup data.
       KYC_DIR: /data/kyc
       KYC_ENC_KEY: ${KYC_ENC_KEY:?jalankan scripts/gen-secrets.sh}
+      # Anti-bot Turnstile (OTP & masuk antrean). Kosong keduanya = mati; hanya satu terisi = API menolak start.
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
     volumes:
       - uploads:/data/uploads
       - kyc:/data/kyc
@@ -164,6 +167,8 @@ services:
         NEXT_PUBLIC_DEV_LOGIN: "false"
         NEXT_PUBLIC_MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-}
         NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION: ${MIDTRANS_IS_PRODUCTION:-false}
+        # Site key Turnstile tertanam ke bundle (publik). Ubah = make prod-up (build ulang).
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     read_only: true
     tmpfs:
       - /tmp

@@ -32,3 +32,22 @@ func TestFinanceConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestTurnstileConfigPairs(t *testing.T) {
+	if c := Load(); c.Turnstile.Enabled() || c.Validate() != nil {
+		t.Fatal("tanpa kunci: fitur mati dan konfigurasi sah")
+	}
+	for _, tc := range []struct{ site, secret string }{{"1x00000000000000000000AA", ""}, {"", "rahasia-turnstile-uji"}} {
+		t.Setenv("TURNSTILE_SITE_KEY", tc.site)
+		t.Setenv("TURNSTILE_SECRET_KEY", tc.secret)
+		err := Load().Validate()
+		if err == nil || !strings.Contains(err.Error(), "berpasangan") || strings.Contains(err.Error(), "rahasia-turnstile-uji") {
+			t.Fatalf("site=%q secret terisi=%v harus ditolak tanpa memuat kunci: %v", tc.site, tc.secret != "", err)
+		}
+	}
+	t.Setenv("TURNSTILE_SITE_KEY", "1x00000000000000000000AA")
+	t.Setenv("TURNSTILE_SECRET_KEY", "1x0000000000000000000000000000000AA")
+	if c := Load(); !c.Turnstile.Enabled() || c.Validate() != nil {
+		t.Fatal("dua kunci: fitur hidup")
+	}
+}

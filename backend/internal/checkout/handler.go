@@ -148,7 +148,8 @@ func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := ReserveRequest{CategoryID: categoryID.String(), UserID: userID.String(), Qty: body.Qty, MaxPerUser: cat.MaxPerUser, TTL: h.ttl, Now: now}
+	req := ReserveRequest{CategoryID: categoryID.String(), UserID: userID.String(), Qty: body.Qty, MaxPerUser: cat.MaxPerUser, TTL: h.ttl, Now: now,
+		LimitUntil: cat.SaleCloseAt.Add(UserLimitGrace)}
 	res, err := h.inv.Reserve(r.Context(), req)
 	if errors.Is(err, ErrNotOpen) {
 		// Stok belum ada di Redis (worker belum sinkron / Redis baru restart): muat lalu coba sekali lagi.

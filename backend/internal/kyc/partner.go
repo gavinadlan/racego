@@ -598,6 +598,9 @@ func (h *Handler) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	h.Get(w, r)
 }
 
+// viewDedupe: jendela penggabungan catatan audit pratinjau dokumen.
+const viewDedupe = 10 * time.Second
+
 // Document: GET /verification/documents/{kind} — berkas sendiri dari pengajuan terkini (tercatat).
 func (h *Handler) Document(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -631,9 +634,15 @@ func (h *Handler) serveDocument(w http.ResponseWriter, r *http.Request, v *verif
 		writeErr(w, r, err)
 		return
 	}
-	if err := audit(ctx, h.db, r, v.OrgID, "kyc.document.view", v.ID.String(), map[string]any{"kind": kind, "by": by}); err != nil {
-		httpx.Internal(w, r, err)
-		return
+	// Penampil PDF Chrome meminta berkas dua kali: akses (aktor, dokumen) yang sama dalam viewDedupe
+	// dicatat sekali. Redis bermasalah → tetap dicatat (lebih baik dobel daripada hilang).
+	actor, _ := auth.UserID(ctx)
+	first, rerr := h.rdb.SetNX(ctx, "kyc:view:"+actor.String()+":"+v.ID.String()+":"+string(kind), 1, viewDedupe).Result()
+	if rerr != nil || first {
+		if err := audit(ctx, h.db, r, v.OrgID, "kyc.document.view", v.ID.String(), map[string]any{"kind": kind, "by": by}); err != nil {
+			httpx.Internal(w, r, err)
+			return
+		}
 	}
 	hd := w.Header()
 	hd.Set("Content-Type", d.ContentType)

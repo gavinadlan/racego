@@ -8,7 +8,7 @@ brew install go node k6 cloudflared
 brew install --cask orbstack        # atau Docker Desktop; keduanya menyediakan `docker compose`
 ```
 
-Versi minimal: Go 1.24, Node.js 20, Docker Compose v2.
+Versi minimal: Go 1.27 (`backend/go.mod` memasang `toolchain go1.27.3`: Go ≥ 1.21 yang lebih lama otomatis mengunduhnya), Node.js 20, Docker Compose v2. Image produksi (`backend/Dockerfile`) dan CI memakai Go 1.27.3 yang sama.
 
 ## Pertama kali
 
@@ -83,6 +83,23 @@ Default `DISBURSE_MODE=mock`: tidak ada panggilan ke Midtrans Payouts dan tidak 
 
 Tes keuangan: `internal/ledger/*_test.go` (angka jurnal), `internal/finance/gateway_test.go` (klien Iris & refund Midtrans dengan server HTTP palsu), `internal/server/finance_test.go` (alur lengkap lewat router + Postgres: peran, konkurensi, refund, laporan, integritas, trigger). Ledger append-only, jadi pembersih data tes menghapus jurnalnya dengan `session_replication_role = replica` (butuh user DB superuser, seperti `racego` di Docker).
 
+## Daftar peserta & export CSV
+
+Tab Event → **Peserta** (`/org/{slug}/events/{id}/peserta`): owner & admin melihat tabel (cari nama/email/BIB, filter kategori & status tiket, 50 per halaman) dan **Unduh CSV**; staf RPC hanya ringkasan (per kategori, ukuran jersey, status); keuangan ditolak. Nomor identitas selalu `••••1234`. Setiap unduhan tercatat di `audit_logs` (`participants.download`). Peserta muncul setelah tiket terbit (beli tiket + *Simulasikan bayar berhasil* + worker jalan).
+
+Tes: `internal/server/participants_test.go` (peran, tenant, isolasi, injeksi rumus, filter, refund, audit, batas laju) dan `TestParticipantsExport10k` (10.000 peserta sintetis di-stream; log tes mencetak kenaikan heap puncak). Penulis CSV ada di `internal/csvx`: jenis sel ditentukan tipe Go (`string` = teks disanitasi, `int`/`int64` = angka apa adanya).
+
+## Anti-bot Turnstile (opsional)
+
+Mati secara default. Untuk mencoba di laptop pakai kunci uji resmi Cloudflare ([daftar kunci uji](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)), tanpa mengubah `.env`:
+
+```bash
+make api TURNSTILE_SITE_KEY=1x00000000000000000000AA TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+make web NEXT_PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA
+```
+
+Halaman **Masuk** dan tombol **Masuk antrian** menampilkan widget; tombol terkunci ("Memeriksa…") sampai token ada. Site key uji `2x00000000000000000000AB` selalu gagal (uji pesan error). Hanya satu kunci terisi → API menolak start. Tes otomatis tidak pernah memanggil Cloudflare: backend memakai server siteverify palsu (`internal/turnstile`, `internal/server/turnstile_test.go`); `TURNSTILE_VERIFY_URL` bisa diarahkan ke server palsu lokal untuk uji browser.
+
 ## Menjalankan versi produksi
 
 Untuk mencoba stack produksi (Docker Compose + Caddy, HTTPS lokal) atau men-deploy ke server, lihat [10-deploy.md](10-deploy.md). Singkatnya: `cp .env.prod.example .env.prod && scripts/gen-secrets.sh`, biarkan `SITE_ADDRESS=localhost`, lalu `make prod-up` dan buka https://localhost (sertifikat lokal Caddy; browser akan memperingatkan). `make demo` membukanya ke internet lewat Cloudflare quick tunnel. Stack produksi memakai proyek Docker `racego-prod` dan volume sendiri, jadi tidak mengganggu `make up`.
@@ -111,3 +128,5 @@ CI (`.github/workflows/ci.yml`) menjalankan migrasi + seed di Postgres baru, `go
 | Tetap "belum masuk" setelah login | `FRONTEND_URL` harus persis origin web (mis. `http://localhost:3000`, bukan `127.0.0.1`) agar cookie & CORS cocok |
 | Kamera scanner tidak mau menyala | Browser butuh HTTPS atau `localhost`; dari HP pakai `cloudflared tunnel --url http://localhost:3000` |
 | `go: missing go.sum entry` | Jalankan `cd backend && go mod tidy` |
+| `go: downloading go1.27.3` saat pertama build | Normal: Go lokal lebih lama dari `toolchain` di `go.mod`, jadi toolchain diunduh sekali |
+| `make db-reset` gagal karena ledger | Reset memakai migrasi `down` (DROP trigger lalu tabel), tidak menghapus baris ledger; hanya jalan di `APP_ENV=development` |

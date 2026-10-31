@@ -55,6 +55,10 @@ const (
 	activeCategoriesKey = "inventory:categories"
 	holdKeyGrace        = time.Hour           // detail hold disimpan lebih lama dari hold-nya
 	confirmedMarkerTTL  = 90 * 24 * time.Hour // penanda konfirmasi (idempotensi)
+	// UserLimitGrace: jumlah slot milik user ({cat}:user:<uid>) disimpan sampai penutupan penjualan + ini.
+	UserLimitGrace = 7 * 24 * time.Hour
+	// userLimitFallback: TTL bila batas waktu tidak diketahui (konfirmasi bayar telat, pemanggil tanpa LimitUntil).
+	userLimitFallback = 90 * 24 * time.Hour
 )
 
 // Inventory menyimpan stok tiap kategori di Redis.
@@ -136,6 +140,11 @@ type ReserveRequest struct {
 	MaxPerUser int
 	TTL        time.Duration
 	Now        time.Time
+	// LimitUntil: sampai kapan pembatas "slot per akun" harus diingat (penutupan penjualan + UserLimitGrace).
+	// Kosong = userLimitFallback. TTL key hanya diperpanjang, tidak pernah diperpendek.
+	// ponytail: penutupan penjualan yang diundur > UserLimitGrace setelah pembelian terakhir user bisa
+	// membuat kunci kedaluwarsa lebih dulu; perpanjang TTL saat mitra mengubah sale_close_at bila itu terjadi.
+	LimitUntil time.Time
 }
 
 type Reservation struct {
@@ -158,10 +167,15 @@ func (inv *Inventory) Reserve(ctx context.Context, req ReserveRequest) (Reservat
 	rid := uuid.NewString()
 	expiresAt := req.Now.Add(req.TTL)
 	holdTTL := int64((req.TTL + holdKeyGrace).Seconds())
+	limitTTL := userLimitFallback
+	if !req.LimitUntil.IsZero() {
+		limitTTL = max(req.LimitUntil.Sub(req.Now), req.TTL+holdKeyGrace)
+	}
 
 	res, err := reserveScript.Run(ctx, inv.rdb,
 		[]string{k.stock(), k.user(req.UserID), k.holds(), k.hold(rid)},
 		req.Qty, req.MaxPerUser, expiresAt.Unix(), rid, req.UserID+"|"+strconv.Itoa(req.Qty), holdTTL,
+		int64(limitTTL.Seconds()),
 	).Int()
 	if err != nil {
 		return Reservation{}, err
@@ -226,7 +240,7 @@ func (inv *Inventory) Confirm(ctx context.Context, categoryID, rid, userID strin
 	k := keysFor(categoryID)
 	n, err := confirmScript.Run(ctx, inv.rdb,
 		[]string{k.stock(), k.user(userID), k.holds(), k.hold(rid), k.confirmed(rid)},
-		rid, qty, int64(confirmedMarkerTTL.Seconds())).Int()
+		rid, qty, int64(confirmedMarkerTTL.Seconds()), int64(userLimitFallback.Seconds())).Int()
 	return ConfirmResult(n), err
 }
 

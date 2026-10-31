@@ -27,7 +27,7 @@ RaceGo/
 
 ## Mulai cepat (macOS)
 
-Prasyarat: **Go ≥ 1.24**, **Node.js ≥ 20**, **Docker** (Docker Desktop / OrbStack / Colima). Detail di [docs/08-development.md](docs/08-development.md).
+Prasyarat: **Go ≥ 1.27** (go.mod memakai toolchain go1.27.3; Go yang lebih lama mengunduhnya otomatis), **Node.js ≥ 20**, **Docker** (Docker Desktop / OrbStack / Colima). Detail di [docs/08-development.md](docs/08-development.md).
 
 ```bash
 make setup     # buat .env, unduh dependensi Go & npm (sekali saja)
@@ -87,7 +87,7 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | |
 | Kalender bulanan & daftar, arsip race, halaman penyelenggara | 2FA super admin, retensi data verifikasi |
 | Multi-tenant (mitra, peran, isolasi data) | |
-| Reservasi atomik Redis + timer + pengembalian kuota | Turnstile / anti-bot, ballot |
+| Reservasi atomik Redis + timer + pengembalian kuota | Anti multi-akun, ballot (Turnstile opsional sudah ada) |
 | Antrian virtual opsional per event (lobi diundi, pemanggilan bertahap, pass HMAC) | Antrian lintas event |
 | Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan ke Iris sandbox sungguhan (klien teruji server palsu), ganti rekening |
 | Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
@@ -96,6 +96,6 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund parsial/massal |
 | Scanner race pack (kamera, manual, anti dobel scan) | Row-Level Security Postgres |
 | Ledger double-entry append-only + email tiket | Observabilitas (Grafana) |
-| Keuangan mitra: saldo tertahan/tersedia, pencairan maker-checker (mock / Midtrans Payouts), refund per order, laporan CSV, cek integritas ledger | Rekonsiliasi settlement Midtrans, kuota kembali setelah refund |
+| Keuangan mitra: saldo tertahan/tersedia, pencairan maker-checker (mock / Midtrans Payouts), refund per order, laporan CSV, cek integritas ledger; daftar & export CSV peserta per event; anti-bot Turnstile opsional (OTP & antrean) | Rekonsiliasi settlement Midtrans, kuota kembali setelah refund |
 
 Dokumen PRD & arsitektur lengkap: [docs/](docs/README.md).
