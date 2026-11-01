@@ -25,13 +25,14 @@ npm run build
 | `/tickets` | Tiket saya: tiket berbentuk BIB dengan QR |
 | `/daftar-mitra` | Daftarkan penyelenggara (login wajib): nama, alamat/slug dengan cek ketersediaan, kota, profil |
 | `/org/[org]` | Dashboard mitra, tab **Event**: status (Draft/Terbit/Ditutup), penjualan, progres race pack, Buat/Edit (owner/admin), scanner. `?baru=1` = banner setelah mendaftar |
-| `/org/[org]/tim` | Tab **Tim** (owner): tambah anggota by email, ubah peran, hapus |
+| `/org/[org]/tim` | Tab **Tim** (owner & admin): undang anggota via email, undangan tertunda (kirim ulang/cabut); owner juga ubah peran & hapus anggota |
+| `/undangan/[token]` | Halaman penerima undangan: ringkasan, masuk dengan email yang sama, terima |
 | `/org/[org]/verifikasi` | Tab **Verifikasi** (owner; peran lain melihat status): stepper 4 langkah (jenis & identitas, dokumen dengan unggah/progres/pratinjau, rekening, tinjau & kirim + persetujuan), simpan otomatis saat pindah langkah, peringatan bila meninggalkan halaman. Banner status (belum diajukan / menunggu / ditolak + Ajukan ulang / lencana Terverifikasi) tampil di semua tab dashboard |
 | `/admin` | Super admin: antrean verifikasi (Menunggu/Disetujui/Ditolak + jumlah), cari nama org. Selain super admin melihat 404 |
 | `/admin/verifikasi/[id]` | Detail pengajuan: data tersamar + "Tampilkan" (tercatat), penanda kecocokan nama rekening, pratinjau dokumen di halaman, anggota, riwayat, daftar periksa, dialog Setujui/Tolak (alasan + penghitung) |
 | `/org/[org]/profil` | Tab **Profil**: deskripsi, kota, instagram, situs, warna, logo (slug tidak bisa diubah) |
 | `/org/[org]/events/new`, `/org/[org]/events/[eventId]/edit` | Form event (`components/event-form.tsx`): informasi, poster, penjualan (WIB), tabel kategori (jadi kartu di HP), pratinjau kartu BIB, Simpan draft / Terbitkan / Tutup penjualan / Hapus draft dengan dialog konfirmasi |
-| `/org/[org]/events/[eventId]/scan` | Scanner race pack (kamera via `@zxing/browser`, input manual, pencarian nama/BIB) |
+| `/org/[org]/events/[eventId]/scan` | Scanner race pack (kamera via `@zxing/browser`, input manual, pencarian nama/BIB) + mode offline (`lib/offline-store.ts` IndexedDB, `lib/qr-verify.ts` WebCrypto Ed25519, `lib/offline-scanner.ts` antrean & sinkron). Tidak bisa dimuat ulang saat offline (lihat docs/05) |
 | `/org/[org]/events/[eventId]/peserta` | Peserta: ringkasan (kategori, ukuran jersey, status tiket); owner/admin juga tabel berpaginasi + cari/filter + Unduh CSV. Staf RPC hanya ringkasan |
 
 ## Bahasa visual

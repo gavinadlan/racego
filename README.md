@@ -47,7 +47,7 @@ Atau pakai akun contoh di menu **Akun contoh (dev)** (kanan atas):
 | Sari | Owner Jakarta Runners | Dashboard mitra: penjualan & progres race pack |
 | Andi | Staf RPC Jakarta | **Scan race pack**: QR valid → hijau, scan ulang → kuning |
 | Rina | Owner Bandung Trail | Coba buka data Jakarta → ditolak (isolasi multi-tenant) |
-| Akunmu sendiri | Calon mitra | Menu akun → **Jadi penyelenggara** → buat event (kategori, poster) → **Terbitkan** → event muncul di beranda; tambah staf di tab **Tim** |
+| Akunmu sendiri | Calon mitra | Menu akun → **Jadi penyelenggara** → buat event (kategori, poster) → **Terbitkan** → event muncul di beranda; undang staf lewat email di tab **Tim** |
 
 Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di port **55432** dan Redis di **6380** (bukan port bawaan) supaya tidak bentrok dengan instalasi lain di Mac.
 
@@ -93,8 +93,8 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
 | Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | Kupon & harga bertahap |
 | Verifikasi mitra: dokumen & rekening terenkripsi, peninjauan super admin `/admin` | Rotasi kunci enkripsi |
-| Tiket QR bertanda tangan Ed25519 + BIB otomatis | Mode offline scanner, refund parsial/massal |
-| Scanner race pack (kamera, manual, anti dobel scan) | Row-Level Security Postgres |
+| Tiket QR bertanda tangan Ed25519 + BIB otomatis | Enkripsi data scanner offline (PIN), refund parsial/massal |
+| Scanner race pack (kamera, manual, anti dobel scan, mode offline + sinkron) | Row-Level Security Postgres |
 | Ledger double-entry append-only + email tiket | Observabilitas (Grafana) |
 | Keuangan mitra: saldo tertahan/tersedia, pencairan maker-checker (mock / Midtrans Payouts), refund per order, laporan CSV, cek integritas ledger; daftar & export CSV peserta per event; anti-bot Turnstile opsional (OTP & antrean) | Rekonsiliasi settlement Midtrans, kuota kembali setelah refund |
 

@@ -11,7 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/gavinadlan/racego/backend/internal/auth"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
@@ -71,8 +73,10 @@ func IssueForOrder(ctx context.Context, tx pgx.Tx, signer *Signer, orderID uuid.
 // ===== HTTP =====
 
 type Handler struct {
-	db     *pgxpool.Pool
-	signer *Signer
+	db          *pgxpool.Pool
+	signer      *Signer
+	rdb         redis.Cmdable // scanner offline (pembatas laju manifest); lihat SetOffline
+	manifestTTL time.Duration
 }
 
 func NewHandler(db *pgxpool.Pool, signer *Signer) *Handler { return &Handler{db: db, signer: signer} }
@@ -168,18 +172,25 @@ func (h *Handler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, ticketID := h.scan(r.Context(), m.OrgID, eventID, staffID, req)
+	resp, ticketID := scan(r.Context(), h.db, h.signer, m.OrgID, eventID, staffID, req)
 	_, _ = h.db.Exec(r.Context(), `
 		INSERT INTO scan_logs (org_id, event_id, ticket_id, staff_id, result) VALUES ($1, $2, $3, $4, $5)`,
 		m.OrgID, eventID, ticketID, staffID, resp.Result)
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) scan(ctx context.Context, orgID, eventID, staffID uuid.UUID, req ScanRequest) (ScanResponse, *uuid.UUID) {
+// dbtx: pool (scan online) atau transaksi (sinkron offline).
+type dbtx interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// scan: logika bersama scan online & sinkron offline. Server selalu memverifikasi ulang QR.
+func scan(ctx context.Context, db dbtx, signer *Signer, orgID, eventID, staffID uuid.UUID, req ScanRequest) (ScanResponse, *uuid.UUID) {
 	var ticketID uuid.UUID
 	switch {
 	case req.Token != "":
-		tid, qrEvent, err := Verify(h.signer.PublicKey(), req.Token)
+		tid, qrEvent, err := Verify(signer.PublicKey(), req.Token)
 		if err != nil {
 			return ScanResponse{Result: "invalid", Message: "QR tidak dikenali atau palsu"}, nil
 		}
@@ -202,7 +213,7 @@ func (h *Handler) scan(ctx context.Context, orgID, eventID, staffID uuid.UUID, r
 		pickedUp = &s
 	}
 	// Atomik: hanya scan pertama yang mengubah status. Dobel scan → 0 baris.
-	tag, err := h.db.Exec(ctx, `
+	tag, err := db.Exec(ctx, `
 		UPDATE tickets SET status = 'collected', collected_at = now(), collected_by = $4, collected_by_name = $5
 		WHERE id = $1 AND event_id = $2 AND org_id = $3 AND status = 'issued'`,
 		ticketID, eventID, orgID, staffID, pickedUp)
@@ -210,7 +221,7 @@ func (h *Handler) scan(ctx context.Context, orgID, eventID, staffID uuid.UUID, r
 		return ScanResponse{Result: "error", Message: "Gagal memproses, coba lagi"}, &ticketID
 	}
 
-	t, err := h.ticketDetail(ctx, ticketID, eventID, orgID)
+	t, err := ticketDetail(ctx, db, ticketID, eventID, orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ScanResponse{Result: "not_found", Message: "Tiket tidak terdaftar di event ini"}, &ticketID
 	}
@@ -228,9 +239,9 @@ func (h *Handler) scan(ctx context.Context, orgID, eventID, staffID uuid.UUID, r
 	}
 }
 
-func (h *Handler) ticketDetail(ctx context.Context, ticketID, eventID, orgID uuid.UUID) (ScanTicket, error) {
+func ticketDetail(ctx context.Context, db dbtx, ticketID, eventID, orgID uuid.UUID) (ScanTicket, error) {
 	var t ScanTicket
-	err := h.db.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT t.id, p.full_name, c.code, t.bib_number, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name
 		FROM tickets t
 		JOIN participants p ON p.id = t.participant_id

@@ -354,8 +354,28 @@ export const updateCategory = (org: string, id: string, catId: string, body: Cat
 export const deleteCategory = (org: string, id: string, catId: string) =>
   apiFetch<PartnerEvent>(ev(org, id, `/categories/${catId}`), { method: "DELETE" });
 
-export const addMember = (org: string, body: { email: string; role: Role }) =>
-  apiFetch<{ members: Member[] }>(`/v1/org/${org}/members`, { method: "POST", body });
+// Undangan tim (anggota baru selalu lewat undangan email). Token mentah hanya ada di tautan email.
+export type Invitation = {
+  id: string;
+  email: string;
+  role: Role;
+  invited_by: string;
+  created_at: string;
+  last_sent_at: string;
+  expires_at: string;
+  send_count: number;
+  status: "pending" | "expired";
+  can_manage: boolean;
+  resend_after: string | null;
+};
+export type InvitationList = { invitations: Invitation[]; invitable_roles: Role[]; max_sends: number };
+export type InvitationView = { org_name: string; org_slug: string; role: Role; invited_by: string; email_masked: string; expires_at: string; email_matches: boolean | null };
+export const createInvitation = (org: string, body: { email: string; role: Role }) =>
+  apiFetch<InvitationList>(`/v1/org/${org}/invitations`, { method: "POST", body });
+export const resendInvitation = (org: string, id: string) => apiFetch<InvitationList>(`/v1/org/${org}/invitations/${id}/resend`, { method: "POST" });
+export const revokeInvitation = (org: string, id: string) => apiFetch<InvitationList>(`/v1/org/${org}/invitations/${id}`, { method: "DELETE" });
+export const acceptInvitation = (token: string) =>
+  apiFetch<{ org_slug: string; org_name: string; role: Role; already_member: boolean }>(`/v1/invitations/${encodeURIComponent(token)}/accept`, { method: "POST" });
 export const updateMember = (org: string, userId: string, role: Role) =>
   apiFetch<{ members: Member[] }>(`/v1/org/${org}/members/${userId}`, { method: "PATCH", body: { role } });
 export const removeMember = (org: string, userId: string) =>

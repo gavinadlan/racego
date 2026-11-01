@@ -27,7 +27,7 @@ export function OrgShell({ tab, children }: { tab: Tab; children: (profile: OrgP
   const tabs: { id: Tab; href: string; label: string }[] = [
     { id: "events", href: `/org/${org}`, label: "Event" },
     ...(data.role === "owner" || data.role === "finance" ? [{ id: "finance" as Tab, href: `/org/${org}/keuangan`, label: "Keuangan" }] : []),
-    ...(data.role === "owner" ? [{ id: "team" as Tab, href: `/org/${org}/tim`, label: "Tim" }] : []),
+    ...(data.role === "owner" || data.role === "admin" ? [{ id: "team" as Tab, href: `/org/${org}/tim`, label: "Tim" }] : []),
     { id: "verification", href: `/org/${org}/verifikasi`, label: "Verifikasi" },
     { id: "profile", href: `/org/${org}/profil`, label: "Profil" },
   ];

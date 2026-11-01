@@ -43,6 +43,9 @@ type Config struct {
 	MailFrom     string
 
 	Turnstile TurnstileConfig
+
+	// ScanManifestTTL: masa berlaku data scanner offline di perangkat (SCAN_MANIFEST_TTL_HOURS, default 24).
+	ScanManifestTTL time.Duration
 }
 
 // TurnstileConfig: anti-bot Cloudflare Turnstile di permintaan kode OTP dan masuk antrean.
@@ -142,14 +145,15 @@ func Load() Config {
 			PassTTL:      getDuration("QUEUE_PASS_TTL", 10*time.Minute),
 			HeartbeatTTL: getDuration("QUEUE_HEARTBEAT_TTL", 45*time.Second),
 		},
-		AutoVerifyOrgs: getBool("AUTO_VERIFY_ORGS", env == "development"),
-		UploadDir:      get("UPLOAD_DIR", "./data/uploads"),
-		KYCEncKey:      os.Getenv("KYC_ENC_KEY"),
-		KYCDir:         get("KYC_DIR", "./data/kyc"),
-		SMTPAddr:       get("SMTP_ADDR", "localhost:1025"),
-		SMTPUsername:   os.Getenv("SMTP_USERNAME"),
-		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
-		MailFrom:       get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
+		AutoVerifyOrgs:  getBool("AUTO_VERIFY_ORGS", env == "development"),
+		UploadDir:       get("UPLOAD_DIR", "./data/uploads"),
+		KYCEncKey:       os.Getenv("KYC_ENC_KEY"),
+		KYCDir:          get("KYC_DIR", "./data/kyc"),
+		SMTPAddr:        get("SMTP_ADDR", "localhost:1025"),
+		SMTPUsername:    os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:    os.Getenv("SMTP_PASSWORD"),
+		MailFrom:        get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
+		ScanManifestTTL: time.Duration(strictInt("SCAN_MANIFEST_TTL_HOURS", 24, 1)) * time.Hour,
 		Turnstile: TurnstileConfig{
 			SiteKey:   os.Getenv("TURNSTILE_SITE_KEY"),
 			SecretKey: os.Getenv("TURNSTILE_SECRET_KEY"),

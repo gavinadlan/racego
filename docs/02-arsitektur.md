@@ -35,12 +35,12 @@ flowchart TB
 | `queue` | Antrian virtual per event: lobi, urutan acak, pemanggilan (Lua `join` / `status` / `admit` / `release`), pass HMAC yang diperiksa `checkout` lewat antarmuka `QueueGate` |
 | `ratelimit` | Pembatas INCR + EXPIRE di Redis, dipakai OTP dan antrian |
 | `payment` | Snap client (HTTP & mock), verifikasi & pemrosesan webhook Midtrans |
-| `ticket` | Tanda tangan QR Ed25519, penerbitan tiket + BIB, scan race pack |
+| `ticket` | Tanda tangan QR Ed25519, penerbitan tiket + BIB, scan race pack online, manifest scanner offline (stream + gzip, `?since`) dan sinkron batch idempoten per `client_op_id` |
 | `ledger` | Jurnal double-entry (append-only, dijaga trigger DB), fee platform, estimasi biaya PG, saldo mitra dari entri, pemeriksaan integritas |
 | `finance` | Keuangan mitra: rilis saldo setelah masa tahan, pencairan maker-checker lewat `Disburser` (mock / Midtrans Payouts Iris), refund per order lewat `Refunder` (mock / Core API), laporan & CSV. Bergantung pada `ledger`, `notify`, `secretbox`; dipakai `server` dan `worker` |
 | `tenant` | Middleware multi-tenant: slug mitra → `org_id` + cek peran |
 | `event` | Katalog publik (hanya event terbit dari mitra terverifikasi), ringkasan penjualan mitra |
-| `partner` | Portal mitra: daftar penyelenggara, profil, CRUD event & kategori, terbitkan/tutup, anggota tim, audit |
+| `partner` | Portal mitra: daftar penyelenggara, profil, CRUD event & kategori, terbitkan/tutup, anggota tim, undangan staf via email (token SHA-256, email dikirim langsung di dalam transaksi), audit |
 | `upload` | Validasi & simpan gambar (poster, logo) di balik antarmuka `Storage` (sekarang disk lokal) |
 | `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order, rilis saldo tiap jam, eksekusi & cek status pencairan/refund tiap 15 detik), dan pemanggilan antrian tiap detik di goroutine terpisah |
 | `auth` | Login email + OTP, sesi cookie, profil `/me`, middleware identitas & CSRF |
@@ -54,6 +54,10 @@ Aturan dependensi: modul boleh saling impor ke arah "bawah" saja (`checkout` →
 2. **Order** — reservasi + data peserta disimpan sebagai order `pending` di Postgres (idempotent lewat header `Idempotency-Key`), lalu token Snap dibuat.
 3. **Webhook** — Midtrans memanggil `/v1/webhooks/midtrans`. Signature diverifikasi, event dicatat unik per `(order, status)`, status order hanya bergerak maju, dan pesan `order.paid` ditulis ke tabel `outbox` **dalam transaksi yang sama**.
 4. **Worker** — mengambil pesan outbox (`FOR UPDATE SKIP LOCKED`), mengunci slot di Redis, menerbitkan tiket, menulis jurnal ledger, lalu mengantrekan email. Setiap langkah idempotent; gagal → retry dengan backoff.
+
+## Scanner offline
+
+Staf mengunduh manifest event (nama, BIB, kategori, jersey, status + kunci publik QR) ke IndexedDB perangkat (`frontend/src/lib/offline-store.ts`). Saat offline, QR diverifikasi di peramban dengan WebCrypto Ed25519 (`lib/qr-verify.ts`) dan "tandai diambil" masuk antrean lokal; saat online antrean dikirim ke `POST …/scan/batch`, yang memverifikasi ulang dan memakai UPDATE atomik yang sama dengan scan online (yang pertama diproses server menang; sisanya bentrokan untuk ditinjau). Halaman scanner tidak bisa dimuat ulang tanpa internet (tidak ada service worker; alasannya di [05-tiket-qr-dan-scan](05-tiket-qr-dan-scan.md#memuat-ulang-tanpa-internet-keputusan-tidak-didukung)).
 
 ## Antrian virtual
 

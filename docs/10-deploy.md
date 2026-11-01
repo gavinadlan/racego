@@ -158,6 +158,12 @@ Hanya satu kunci terisi → API menolak start. Bila Cloudflare tidak terjangkau,
 
 **CSP**: Caddy belum memasang `Content-Security-Policy`, jadi tidak ada yang perlu diubah. Saat CSP dipasang (roadmap), izinkan `https://challenges.cloudflare.com` di `script-src` dan `frame-src` ([panduan Cloudflare](https://developers.cloudflare.com/turnstile/reference/content-security-policy/)).
 
+## 4c. Scanner offline & undangan staf
+
+- Tidak ada perubahan Caddy dan tidak ada service worker. Masa berlaku data scanner di perangkat panitia: `SCAN_MANIFEST_TTL_HOURS` (bawaan 24 jam) di `.env.prod`; pendek = lebih aman bila perangkat hilang, tapi staf harus mengunduh ulang lebih sering.
+- Undangan staf memakai SMTP yang sama dengan kode masuk; tautan dibentuk dari `SITE_ADDRESS` (`FRONTEND_URL`). Bila SMTP gagal, undangan tidak dibuat (502) dan bisa dicoba lagi.
+- Sebelum hari-H: staf masuk, buka **Scan race pack**, *Siapkan mode offline* selagi ada sinyal, dan **jangan memuat ulang** halaman saat offline.
+
 ## 5. Operasional sehari-hari
 
 | Kebutuhan | Perintah |

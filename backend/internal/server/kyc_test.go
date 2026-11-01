@@ -548,7 +548,7 @@ func TestKYCAuthorization(t *testing.T) {
 	// Peran lain di org A → ditolak.
 	for _, role := range []string{"admin", "finance", "rpc_staff"} {
 		u := e.user("staf-" + role)
-		e.must(e.do(ownerA, "POST", "/v1/org/"+a+"/members", map[string]any{"email": e.email("staf-" + role), "role": role}), 201)
+		e.join(a, u, role) // Tugas 08: POST /members dihapus (undangan email)
 		if r := e.do(u, "GET", baseA, nil); r.code != 403 {
 			t.Fatalf("%s ke /verification: %d", role, r.code)
 		}
@@ -566,7 +566,7 @@ func TestKYCAuthorization(t *testing.T) {
 	}
 	// Super admin yang anggota org → conflict_of_interest.
 	saMember := e.superAdmin("sa-anggota")
-	e.must(e.do(ownerA, "POST", "/v1/org/"+a+"/members", map[string]any{"email": e.email("sa-anggota"), "role": "finance"}), 201)
+	e.join(a, saMember, "finance") // Tugas 08: POST /members dihapus (undangan email)
 	for _, action := range []string{"/approve", "/reject"} {
 		if r := e.do(saMember, "POST", adm+action, map[string]any{"reason": "alasan yang cukup panjang"}); r.code != 403 || r.body["error"] != "conflict_of_interest" {
 			t.Fatalf("benturan kepentingan %s: %s", action, r.raw)

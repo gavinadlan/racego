@@ -18,6 +18,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/ledger"
 	"github.com/gavinadlan/racego/backend/internal/notify"
+	"github.com/gavinadlan/racego/backend/internal/partner"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/queue"
 	"github.com/gavinadlan/racego/backend/internal/ticket"
@@ -101,6 +102,7 @@ func (w *Worker) Run(ctx context.Context) {
 			w.runFinance(ctx)
 		case <-release.C:
 			w.releaseBalances(ctx)
+			w.cleanupInvitations(ctx)
 		}
 	}
 }
@@ -324,6 +326,15 @@ func deref(s *string) string {
 }
 
 // ===== Job berkala =====
+
+// cleanupInvitations: hash token undangan berumur > 30 hari dibuang (status tetap dihitung dari kolom waktu).
+func (w *Worker) cleanupInvitations(ctx context.Context) {
+	if n, err := partner.CleanupInvitations(ctx, w.db); err != nil {
+		slog.ErrorContext(ctx, "bersihkan undangan", "err", err)
+	} else if n > 0 {
+		slog.InfoContext(ctx, "token undangan lama dibuang", "jumlah", n)
+	}
+}
 
 // releaseBalances: saldo tertahan → tersedia untuk order yang masa tahannya lewat (idempotent).
 func (w *Worker) releaseBalances(ctx context.Context) {

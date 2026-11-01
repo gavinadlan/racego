@@ -130,6 +130,19 @@ func OTPEmail(code string) (string, string) {
 	return subject, body
 }
 
+// InvitationEmail: undangan bergabung ke tim mitra. Sengaja hanya memuat nama org, peran, pengundang,
+// dan tautan (tanpa data anggota/akun lain).
+func InvitationEmail(orgName, role, inviter, link string) (string, string) {
+	subject := "Undangan bergabung ke tim " + orgName + " di RaceGo"
+	body := fmt.Sprintf(`<div style="font-family:system-ui,sans-serif;max-width:560px">
+<h2>Kamu diundang ke tim %s</h2>
+<p><b>%s</b> mengundangmu bergabung sebagai <b>%s</b> di dashboard penyelenggara RaceGo.</p>
+<p><a href="%s" style="display:inline-block;margin-top:8px;padding:10px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">Lihat undangan</a></p>
+<p style="color:#666;font-size:13px">Tautan berlaku 7 hari dan hanya bisa dipakai sekali, dengan masuk memakai alamat email ini. Tidak merasa mengenal pengundangnya? Abaikan email ini.</p></div>`,
+		html.EscapeString(orgName), html.EscapeString(inviter), html.EscapeString(role), html.EscapeString(link))
+	return subject, body
+}
+
 // VerificationEmail: status verifikasi mitra untuk owner. event = submitted | approved | rejected.
 // Sengaja TIDAK memuat data sensitif (NIK, nomor rekening, NPWP); hanya nama org, status, dan alasan.
 func VerificationEmail(orgName, event, reason, pageURL string) (string, string) {

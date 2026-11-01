@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFinanceConfig(t *testing.T) {
@@ -49,5 +50,19 @@ func TestTurnstileConfigPairs(t *testing.T) {
 	t.Setenv("TURNSTILE_SECRET_KEY", "1x0000000000000000000000000000000AA")
 	if c := Load(); !c.Turnstile.Enabled() || c.Validate() != nil {
 		t.Fatal("dua kunci: fitur hidup")
+	}
+}
+
+func TestScanManifestTTL(t *testing.T) {
+	if c := Load(); c.ScanManifestTTL != 24*time.Hour || c.Validate() != nil {
+		t.Fatalf("default: %v", c.ScanManifestTTL)
+	}
+	t.Setenv("SCAN_MANIFEST_TTL_HOURS", "6")
+	if c := Load(); c.ScanManifestTTL != 6*time.Hour {
+		t.Fatalf("6 jam: %v", c.ScanManifestTTL)
+	}
+	t.Setenv("SCAN_MANIFEST_TTL_HOURS", "0")
+	if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), "SCAN_MANIFEST_TTL_HOURS") {
+		t.Fatalf("0 harus ditolak: %v", err)
 	}
 }

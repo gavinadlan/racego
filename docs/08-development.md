@@ -100,6 +100,20 @@ make web NEXT_PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA
 
 Halaman **Masuk** dan tombol **Masuk antrian** menampilkan widget; tombol terkunci ("Memeriksa…") sampai token ada. Site key uji `2x00000000000000000000AB` selalu gagal (uji pesan error). Hanya satu kunci terisi → API menolak start. Tes otomatis tidak pernah memanggil Cloudflare: backend memakai server siteverify palsu (`internal/turnstile`, `internal/server/turnstile_test.go`); `TURNSTILE_VERIFY_URL` bisa diarahkan ke server palsu lokal untuk uji browser.
 
+## Undangan staf
+
+Tab **Tim** (`/org/{slug}/tim`, owner & admin) → *Undang anggota*. Email undangan terkirim ke Mailpit (http://localhost:8025): buka tautan `/undangan/<token>`, masuk dengan email yang sama, lalu *Terima undangan*. Tautan **tidak** dicatat di log API (beda dengan kode OTP dev). Untuk mencoba kedaluwarsa: `UPDATE org_invitations SET expires_at = now() - interval '1 minute' WHERE email = '…'`. Tes: `internal/server/invitations_test.go` (matriks peran, tenant, email beda, terima paralel, token tidak tersimpan mentah, batas laju, audit).
+
+## Scanner offline
+
+Masuk sebagai owner/admin/staf race pack → event → **Scan race pack** → *Siapkan mode offline*. Lalu:
+
+- **Chrome DevTools**: tab *Network* → *No throttling* ganti ke *Offline*. Pindai/tempel QR (isi `qr_token` dari `GET /v1/me/tickets` pembeli), lihat "Belum terkirim" bertambah. Kembali *No throttling* → antrean terkirim otomatis. Data perangkat: *Application* → *IndexedDB* → `racego-scanner` (`manifests`, `tickets`, `queue`).
+- **Jangan muat ulang saat offline**: halaman scanner hanya bisa dibuka dengan internet (peramban meminta konfirmasi). Antrean tetap tersimpan bila tab tertutup.
+- **Dua perangkat**: dua profil/jendela samaran, keduanya siapkan mode offline, offline, pindai tiket yang sama → online-kan satu per satu: yang kedua mendapat "Perlu ditinjau".
+- **Playwright** (di folder di luar repo): `context.setOffline(true/false)`, satu context per perangkat, `page.clock.install()` + `clock.fastForward("25:00:00")` untuk menguji kedaluwarsa, `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=qr.y4m` untuk jalur kamera (video QR dibuat dengan `ffmpeg -loop 1 -i qr.png -t 3 -pix_fmt yuv420p qr.y4m`).
+- Masa berlaku data: `SCAN_MANIFEST_TTL_HOURS` (bawaan 24). Tes backend: `internal/server/offline_scan_test.go` (manifest: peran, minimisasi kunci JSON, `?since`, 10.000 tiket; batch: idempoten, paralel dua perangkat, QR palsu, event salah, refund, batas).
+
 ## Menjalankan versi produksi
 
 Untuk mencoba stack produksi (Docker Compose + Caddy, HTTPS lokal) atau men-deploy ke server, lihat [10-deploy.md](10-deploy.md). Singkatnya: `cp .env.prod.example .env.prod && scripts/gen-secrets.sh`, biarkan `SITE_ADDRESS=localhost`, lalu `make prod-up` dan buka https://localhost (sertifikat lokal Caddy; browser akan memperingatkan). `make demo` membukanya ke internet lewat Cloudflare quick tunnel. Stack produksi memakai proyek Docker `racego-prod` dan volume sendiri, jadi tidak mengganggu `make up`.
@@ -129,4 +143,6 @@ CI (`.github/workflows/ci.yml`) menjalankan migrasi + seed di Postgres baru, `go
 | Kamera scanner tidak mau menyala | Browser butuh HTTPS atau `localhost`; dari HP pakai `cloudflared tunnel --url http://localhost:3000` |
 | `go: missing go.sum entry` | Jalankan `cd backend && go mod tidy` |
 | `go: downloading go1.27.3` saat pertama build | Normal: Go lokal lebih lama dari `toolchain` di `go.mod`, jadi toolchain diunduh sekali |
+| Scanner: "Penyimpanan offline diblokir" | Mode samaran/izin situs memblokir IndexedDB; scan online tetap jalan |
+| Scanner: "belum mendukung verifikasi tanda tangan Ed25519" | Peramban terlalu lama untuk mode offline (perlu Chrome/Edge 137+, Safari 17+, Firefox 129+) |
 | `make db-reset` gagal karena ledger | Reset memakai migrasi `down` (DROP trigger lalu tabel), tidak menghapus baris ledger; hanya jalan di `APP_ENV=development` |

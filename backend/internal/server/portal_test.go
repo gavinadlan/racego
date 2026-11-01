@@ -103,6 +103,15 @@ func (e *portalEnv) user(name string) uuid.UUID {
 	return id
 }
 
+// join memasukkan user ke org (path "/v1/org/<slug>" atau slug) tanpa alur undangan; hanya untuk tes.
+func (e *portalEnv) join(org string, user uuid.UUID, role string) {
+	e.t.Helper()
+	slug := strings.TrimPrefix(org, "/v1/org/")
+	if _, err := e.db.Exec(context.Background(), `INSERT INTO org_members (org_id, user_id, role) SELECT id, $2, $3 FROM organizations WHERE slug = $1`, slug, user, role); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func (e *portalEnv) email(name string) string { return name + "." + e.tag + "@uji.test" }
 
 type resp struct {
@@ -352,7 +361,7 @@ func TestPortalTenantIsolationAndRoles(t *testing.T) {
 			}
 		}
 	}
-	for _, c := range []struct{ method, path string }{{"GET", "/events"}, {"GET", "/profile"}, {"PATCH", "/profile"}, {"GET", "/members"}, {"POST", "/members"}, {"POST", "/events"}} {
+	for _, c := range []struct{ method, path string }{{"GET", "/events"}, {"GET", "/profile"}, {"PATCH", "/profile"}, {"GET", "/members"}, {"POST", "/invitations"}, {"POST", "/events"}} {
 		if r := e.do(ownerB, c.method, a+c.path, map[string]any{}); r.code != 404 {
 			t.Errorf("owner B %s org A%s: %d", c.method, c.path, r.code)
 		}
@@ -368,14 +377,10 @@ func TestPortalTenantIsolationAndRoles(t *testing.T) {
 	}
 
 	// Anggota tim.
-	if r := e.do(ownerA, "POST", a+"/members", map[string]any{"email": "belum.pernah." + e.tag + "@uji.test", "role": "rpc_staff"}); r.code != 404 || r.body["error"] != "user_not_found" {
-		t.Fatalf("email belum login: %s", r.raw)
-	}
-	e.must(e.do(ownerA, "POST", a+"/members", map[string]any{"email": e.email("staf"), "role": "rpc_staff"}), 201)
-	e.must(e.do(ownerA, "POST", a+"/members", map[string]any{"email": e.email("keuangan"), "role": "finance"}), 201)
-	if r := e.do(ownerA, "POST", a+"/members", map[string]any{"email": e.email("staf"), "role": "owner"}); r.code != 422 {
-		t.Fatalf("undang sebagai owner: %s", r.raw)
-	}
+	// Tugas 08: POST /members dihapus (anggota baru selalu lewat undangan email, diuji di
+	// invitations_test.go). Di sini anggota langsung dimasukkan untuk menguji hak peran.
+	e.join(a, staff, "rpc_staff")
+	e.join(a, fin, "finance")
 
 	// rpc_staff & finance: baca boleh, tulis ditolak.
 	for _, u := range []uuid.UUID{staff, fin} {
@@ -383,7 +388,7 @@ func TestPortalTenantIsolationAndRoles(t *testing.T) {
 		e.must(e.do(u, "GET", a+"/events/"+idA, nil), 200)
 		for _, c := range []struct{ method, path string }{
 			{"POST", "/events"}, {"PATCH", "/events/" + idA}, {"POST", "/events/" + idA + "/publish"}, {"DELETE", "/events/" + idA},
-			{"PATCH", "/events/" + idA + "/categories/" + catA}, {"PATCH", "/profile"}, {"GET", "/members"}, {"POST", "/members"},
+			{"PATCH", "/events/" + idA + "/categories/" + catA}, {"PATCH", "/profile"}, {"GET", "/members"}, {"POST", "/invitations"},
 		} {
 			if r := e.do(u, c.method, a+c.path, map[string]any{}); r.code != 403 {
 				t.Errorf("%s %s oleh peran baca: %d", c.method, c.path, r.code)

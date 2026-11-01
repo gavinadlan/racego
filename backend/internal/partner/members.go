@@ -50,61 +50,10 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	h.writeMembers(w, r, http.StatusOK)
 }
 
-// Peran yang bisa diberikan lewat undangan. Owner baru hanya lewat ubah peran anggota yang sudah ada.
+// Peran yang bisa diberikan lewat undangan (invitations.go). Owner baru hanya lewat ubah peran
+// anggota yang sudah ada. Menambah anggota selalu lewat undangan email (satu jalur, satu aturan).
 func invitable(role tenant.Role) bool {
 	return role == tenant.RoleAdmin || role == tenant.RoleFinance || role == tenant.RoleRPCStaff
-}
-
-// AddMember: POST /v1/org/{org}/members {"email","role"} — owner. Akunnya harus sudah pernah login
-// (belum ada undangan via email).
-func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var in struct {
-		Email string      `json:"email"`
-		Role  tenant.Role `json:"role"`
-	}
-	if !httpx.Decode(w, r, &in) {
-		return
-	}
-	email, ok := auth.NormalizeEmail(in.Email)
-	f := httpx.Fields{}
-	if !ok {
-		f["email"] = "Format email tidak valid"
-	}
-	if !invitable(in.Role) {
-		f["role"] = "Pilih peran admin, finance, atau staf race pack"
-	}
-	if len(f) > 0 {
-		httpx.Validation(w, f)
-		return
-	}
-	var userID uuid.UUID
-	err := h.db.QueryRow(ctx, `SELECT id FROM users WHERE email = $1`, email).Scan(&userID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		httpx.Error(w, http.StatusNotFound, "user_not_found",
-			"Belum ada akun RaceGo dengan email ini. Minta orang itu masuk ke RaceGo dulu, lalu tambahkan lagi.")
-		return
-	}
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	orgID := tenant.OrgID(ctx)
-	err = pgx.BeginFunc(ctx, h.db, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-			orgID, userID, in.Role)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return statusError{"already_member", "Orang ini sudah menjadi anggota tim"}
-		}
-		return audit(ctx, tx, orgID, "member.added", "member", userID.String(), nil, map[string]any{"email": email, "role": in.Role})
-	})
-	if finish(w, r, err) {
-		return
-	}
-	h.writeMembers(w, r, http.StatusCreated)
 }
 
 // changeMember menjalankan perubahan pada anggota lain dengan baris org terkunci, sehingga dua

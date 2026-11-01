@@ -63,10 +63,12 @@ func NewRouter(d Deps) http.Handler {
 		co.SetRefresher(payment.NewReconciler(pay, d.Cfg.MidtransServerKey, d.Cfg.MidtransIsProduction))
 	}
 	tickets := ticket.NewHandler(d.DB, d.Signer)
+	tickets.SetOffline(d.Redis, d.Cfg.ScanManifestTTL)
 	sessions := auth.NewSessionStore(d.DB)
 	authH := auth.NewHandler(d.DB, auth.NewOTPStore(d.Redis), sessions, d.Mailer, d.Cfg.IsDev())
 	authH.SetTurnstile(captcha)
 	portal := partner.NewHandler(d.DB, d.Inv, d.Cfg.AutoVerifyOrgs)
+	invites := partner.NewInvitations(d.DB, d.Redis, d.Mailer, d.Cfg.FrontendURL)
 	uploads := upload.NewHandler(upload.Disk{Dir: d.Cfg.UploadDir})
 	verif := kyc.NewHandler(d.DB, d.Redis, d.KYCBox, d.Cfg.KYCDir, d.Cfg.AutoVerifyOrgs)
 	people := participant.NewHandler(d.DB, d.Redis)
@@ -108,6 +110,9 @@ func NewRouter(d Deps) http.Handler {
 		r.Post("/auth/otp/verify", authH.VerifyOTP)
 		r.Post("/auth/logout", authH.Logout)
 		r.Get("/auth/session", authH.Session)
+		// Undangan anggota tim: lihat publik (token), terima wajib login dengan email yang sama.
+		r.Get("/invitations/{token}", invites.Show)
+		r.With(auth.Require).Post("/invitations/{token}/accept", invites.Accept)
 
 		// Pelari (wajib login)
 		r.Group(func(r chi.Router) {
@@ -140,6 +145,9 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleRPCStaff))
 				r.Post("/events/{eventID}/scan", tickets.Scan)
 				r.Get("/events/{eventID}/tickets", tickets.EventTickets)
+				// Scanner offline: daftar tiket minimal untuk verifikasi lokal + sinkron antrean perangkat.
+				r.Get("/events/{eventID}/scan-manifest", tickets.Manifest)
+				r.Post("/events/{eventID}/scan/batch", tickets.Batch)
 				// Ringkasan peserta tanpa data pribadi (jumlah per kategori/jersey/status): juga untuk staf RPC.
 				r.Get("/events/{eventID}/participants/summary", people.Summary)
 			})
@@ -148,6 +156,11 @@ func NewRouter(d Deps) http.Handler {
 			r.With(editors).Get("/events/{eventID}/participants.csv", people.CSV)
 			r.Group(func(r chi.Router) {
 				r.Use(editors)
+				// Undangan: owner mengundang admin/finance/rpc_staff, admin hanya rpc_staff (dicek di handler).
+				r.Get("/invitations", invites.List)
+				r.Post("/invitations", invites.Create)
+				r.Post("/invitations/{id}/resend", invites.Resend)
+				r.Delete("/invitations/{id}", invites.Revoke)
 				r.Patch("/profile", portal.UpdateProfile)
 				r.Post("/uploads", uploads.Upload)
 				r.Post("/events", portal.CreateEvent)
@@ -177,7 +190,6 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(ownerOnly)
 				r.Delete("/events/{eventID}", portal.DeleteEvent)
 				r.Get("/members", portal.ListMembers)
-				r.Post("/members", portal.AddMember)
 				r.Patch("/members/{userID}", portal.UpdateMember)
 				r.Delete("/members/{userID}", portal.RemoveMember)
 				r.Get("/verification", verif.Get)

@@ -23,8 +23,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Export XLSX, kolom peserta yang bisa dikustomisasi
 - [x] Upload poster event & logo penyelenggara (disk lokal, EXIF dibuang)
 - [ ] Pembersihan berkala gambar yang tidak dipakai; pindah ke S3/R2
-- [x] Undang staf versi dasar (tambah anggota yang sudah pernah login)
-- [ ] Undangan staf (termasuk staf RPC) via email
+- [x] Undangan staf via email: owner (admin/keuangan/staf race pack) dan admin (staf race pack), akun belum ada pun bisa; tautan sekali pakai 7 hari, kirim ulang/cabut, terima dengan email yang sama (menggantikan "tambah anggota yang sudah pernah login")
+- [ ] Undangan massal (CSV), undangan via WhatsApp/SMS
 
 ## Fase 2 — keuangan
 
@@ -46,7 +46,9 @@ Urut dari yang paling berdampak. Centang bila selesai.
 
 ## Fase 3 — skala & operasional
 
-- [ ] Scanner offline (IndexedDB + verifikasi kunci publik)
+- [x] Scanner offline: manifest minimal ke IndexedDB, verifikasi Ed25519 di perangkat, antrean + sinkron batch idempoten, bentrokan antar-perangkat "Perlu ditinjau", data dihapus saat logout/kedaluwarsa
+- [ ] Enkripsi data scanner offline dengan PIN
+- [ ] Halaman scanner yang bisa dimuat ulang tanpa internet (service worker; menunggu dukungan offline resmi Next.js)
 - [ ] QR dinamis hari-H
 - [ ] Observabilitas: OpenTelemetry → Prometheus/Grafana, dashboard live war tiket
 - [x] CI GitHub Actions: tes backend dengan Postgres, lint/build frontend, build image

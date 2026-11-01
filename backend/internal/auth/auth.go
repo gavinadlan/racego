@@ -41,7 +41,8 @@ func Middleware(lookup LookupFunc, frontendURL string, devMode bool) func(http.H
 					next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), id)))
 					return
 				}
-				if !errors.Is(err, ErrNoSession) {
+				// Klien yang membatalkan request (pindah halaman/tutup tab) bukan error server.
+				if !errors.Is(err, ErrNoSession) && r.Context().Err() == nil {
 					slog.ErrorContext(r.Context(), "cek sesi gagal", "err", err)
 				}
 			}

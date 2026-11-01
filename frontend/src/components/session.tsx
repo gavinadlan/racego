@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { apiFetch, DEV_USER_EVENT, getDevUserId, logout as apiLogout, setDevUserId, type Me } from "@/lib/api";
+import { clearOnLogout } from "@/lib/offline-store";
 
 type Session = {
   ready: boolean; // true setelah GET /v1/auth/session pertama selesai
@@ -46,8 +47,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     void refresh();
   }, [refresh, devUser]);
 
+  // Halaman dibuka saat offline (scanner): sesi baru bisa dicek setelah koneksi kembali.
+  useEffect(() => {
+    const onOnline = () => void refresh();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [refresh]);
+
   const logout = useCallback(async () => {
     await apiLogout().catch(() => {});
+    await clearOnLogout(); // data peserta scanner offline tidak boleh tertinggal di perangkat
     if (getDevUserId()) setDevUserId(null);
     seq.current++;
     setState({ me: null });
