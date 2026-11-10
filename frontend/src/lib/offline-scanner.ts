@@ -399,7 +399,7 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
     if (!needle) return [];
     const out: ManifestTicket[] = [];
     for (const t of tickets.current.values()) {
-      if (t.bib === needle || t.name.toLowerCase().includes(needle)) out.push(t);
+      if (t.bib.toLowerCase() === needle || t.name.toLowerCase().includes(needle)) out.push(t);
       if (out.length >= 20) break;
     }
     return out;
