@@ -11,6 +11,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
 	"github.com/gavinadlan/racego/backend/internal/finance"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
@@ -36,7 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	db, err := platform.NewDB(ctx, cfg.DatabaseURL)
+	db, err := platform.NewDB(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		slog.Error("database", "err", err)
 		os.Exit(1)
@@ -60,6 +61,14 @@ func main() {
 		os.Exit(1)
 	}
 	inv := checkout.NewInventory(rdb)
+	metrics.RegisterPool(db)
+	metrics.RegisterDB(db, worker.MaxAttempts)
+	if ln, err := metrics.Start("WORKER_METRICS_ADDR", cfg.WorkerMetricsAddr, cfg.MetricsToken, cfg.IsDev()); err != nil {
+		slog.Error("metrik", "err", err)
+		os.Exit(1)
+	} else if ln != nil {
+		defer ln.Close()
+	}
 	w := worker.New(db, inv, signer,
 		notify.NewMailer(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.MailFrom), cfg.FrontendURL).
 		WithQueue(queue.NewRunner(db, queue.New(rdb, inv, passSigner, cfg.Queue))).

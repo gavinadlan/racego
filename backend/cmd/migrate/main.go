@@ -7,6 +7,8 @@
 //	go run ./cmd/migrate verify <org-slug>                # verifikasi mitra (boleh menerbitkan event)
 //	go run ./cmd/migrate superadmin <email>               # jadikan akun super admin platform (/admin)
 //	go run ./cmd/migrate release <org-slug>               # DEV: rilis semua saldo tertahan org tanpa menunggu masa tahan
+//	go run ./cmd/migrate loadgen-seed --users N --out f   # UJI BEBAN: pengguna sintetis + event uji (hanya development + DB *_loadtest)
+//	go run ./cmd/migrate loadgen-check --seed f           # UJI BEBAN: pemeriksaan integritas setelah skenario war
 package main
 
 import (
@@ -36,7 +38,7 @@ func main() {
 	}
 	ctx := context.Background()
 	cfg := config.Load()
-	db, err := platform.NewDB(ctx, cfg.DatabaseURL)
+	db, err := platform.NewDB(ctx, cfg.DatabaseURL, 0)
 	if err != nil {
 		log.Fatalf("koneksi database gagal (sudah jalankan `make up`?): %v", err)
 	}
@@ -75,6 +77,15 @@ func main() {
 			log.Fatal("pemakaian: migrate release <org-slug>")
 		}
 		err = release(ctx, db, cfg, os.Args[2])
+	case "loadgen-seed":
+		err = loadgenSeed(ctx, db, cfg.Env, os.Args[2:])
+	case "loadgen-check":
+		rdb, rerr := platform.NewRedis(ctx, cfg.RedisAddr, cfg.RedisPassword)
+		if rerr != nil {
+			log.Fatalf("koneksi redis gagal: %v", rerr)
+		}
+		defer rdb.Close()
+		err = loadgenCheck(ctx, db, rdb, cfg.Env, os.Args[2:])
 	default:
 		err = fmt.Errorf("perintah tidak dikenal: %s", os.Args[1])
 	}

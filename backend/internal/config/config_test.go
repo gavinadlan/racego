@@ -66,3 +66,24 @@ func TestScanManifestTTL(t *testing.T) {
 		t.Fatalf("0 harus ditolak: %v", err)
 	}
 }
+
+func TestMetricsAddrNonLoopbackNeedsToken(t *testing.T) {
+	t.Setenv("METRICS_ADDR", "0.0.0.0:9464")
+	if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), "METRICS_TOKEN") {
+		t.Fatalf("METRICS_ADDR non-loopback tanpa token harus menggagalkan start, dapat: %v", err)
+	}
+	t.Setenv("METRICS_TOKEN", "rahasia")
+	if err := Load().Validate(); err != nil {
+		t.Fatalf("dengan token harus sah: %v", err)
+	}
+	t.Setenv("METRICS_TOKEN", "")
+	t.Setenv("METRICS_ADDR", "127.0.0.1:9464")
+	t.Setenv("WORKER_METRICS_ADDR", ":9465")
+	if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), "WORKER_METRICS_ADDR") {
+		t.Fatalf("WORKER_METRICS_ADDR non-loopback tanpa token harus ditolak, dapat: %v", err)
+	}
+	t.Setenv("WORKER_METRICS_ADDR", "")
+	if c := Load(); c.Validate() != nil || c.MetricsAddr != "127.0.0.1:9464" {
+		t.Fatalf("loopback tanpa token harus sah")
+	}
+}

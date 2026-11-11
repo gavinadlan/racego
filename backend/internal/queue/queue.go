@@ -348,6 +348,19 @@ func (q *Queue) Summary(ctx context.Context, eventID string, now time.Time) (Sum
 	return Summary{QueueSize: int(size.Val()), Active: int(active.Val()), AdmittedTotal: n, Final: final.Val()}, nil
 }
 
+// gauges: ringkasan antrean + umur tanda hidup tertua (peserta yang paling lama tidak polling).
+func (q *Queue) gauges(ctx context.Context, eventID string, now time.Time) (Summary, time.Duration, error) {
+	s, err := q.Summary(ctx, eventID, now)
+	if err != nil {
+		return s, 0, err
+	}
+	z, err := q.rdb.ZRangeWithScores(ctx, keysFor(eventID).seen(), 0, 0).Result()
+	if err != nil || len(z) == 0 {
+		return s, 0, err
+	}
+	return s, max(now.Sub(time.UnixMilli(int64(z[0].Score))), 0), nil
+}
+
 func toInt(v any) int64 {
 	switch x := v.(type) {
 	case int64:

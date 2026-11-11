@@ -17,6 +17,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/ledger"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/partner"
 	"github.com/gavinadlan/racego/backend/internal/payment"
@@ -25,7 +26,9 @@ import (
 )
 
 const (
-	maxAttempts = 10
+	// MaxAttempts: pesan outbox berhenti dicoba setelah sekian kali gagal.
+	MaxAttempts = 10
+	maxAttempts = MaxAttempts
 	// Grace period: slot baru dikembalikan 2 menit setelah timer habis, memberi waktu
 	// webhook settlement yang terlambat datang lebih dulu.
 	releaseGrace = 2 * time.Minute
@@ -90,18 +93,18 @@ func (w *Worker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-outbox.C:
-			w.drainOutbox(ctx)
+			metrics.Step("outbox", func() { w.drainOutbox(ctx) })
 		case <-reconcile.C:
-			w.reconcilePayments(ctx)
+			metrics.Step("reconcile", func() { w.reconcilePayments(ctx) })
 		case <-holds.C:
-			w.expireOrders(ctx)
-			w.releaseExpiredHolds(ctx)
+			metrics.Step("expire_orders", func() { w.expireOrders(ctx) })
+			metrics.Step("release_holds", func() { w.releaseExpiredHolds(ctx) })
 		case <-sync.C:
-			w.syncStock(ctx)
+			metrics.Step("sync_stock", func() { w.syncStock(ctx) })
 		case <-money.C:
-			w.runFinance(ctx)
+			metrics.Step("finance", func() { w.runFinance(ctx) })
 		case <-release.C:
-			w.releaseBalances(ctx)
+			metrics.Step("release_balances", func() { w.releaseBalances(ctx) })
 			w.cleanupInvitations(ctx)
 		}
 	}
@@ -149,7 +152,9 @@ func (w *Worker) processOne(ctx context.Context) (empty bool, err error) {
 		return false, err
 	}
 
-	if handleErr := w.handle(ctx, tx, m); handleErr != nil {
+	handleErr := w.handle(ctx, tx, m)
+	metrics.Outbox(m.Topic, handleErr)
+	if handleErr != nil {
 		_ = tx.Rollback(ctx)
 		slog.WarnContext(ctx, "outbox gagal, akan dicoba lagi", "id", m.ID, "topic", m.Topic, "err", handleErr)
 		// Backoff eksponensial: 2, 4, 8 ... detik, maksimal 10 menit.
@@ -379,7 +384,9 @@ func (w *Worker) runQueues(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			n, errs := w.queue.Tick(ctx, now)
+			var n int
+			var errs []error
+			metrics.Step("queue", func() { n, errs = w.queue.Tick(ctx, now) })
 			for _, err := range errs {
 				slog.ErrorContext(ctx, "antrian", "err", err)
 			}
@@ -433,6 +440,7 @@ func (w *Worker) reconcilePayments(ctx context.Context) {
 }
 
 func (w *Worker) expireOrders(ctx context.Context) {
+	expired := 0
 	err := pgx.BeginFunc(ctx, w.db, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			UPDATE orders SET status = 'expired'
@@ -451,11 +459,13 @@ func (w *Worker) expireOrders(ctx context.Context) {
 				return err
 			}
 		}
-		if len(ids) > 0 {
-			slog.InfoContext(ctx, "order kedaluwarsa", "jumlah", len(ids))
-		}
+		expired = len(ids)
 		return nil
 	})
+	if err == nil && expired > 0 {
+		metrics.Orders.WithLabelValues("expired").Add(float64(expired))
+		slog.InfoContext(ctx, "order kedaluwarsa", "jumlah", expired)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "expire orders", "err", err)
 	}

@@ -47,7 +47,7 @@ func check(ctx context.Context, target string) error {
 	// ponytail: worker dianggap sehat bila dependensinya terjangkau; loop yang macet tidak terdeteksi.
 	// Tambah file heartbeat dari worker.Run bila itu pernah terjadi.
 	cfg := config.Load()
-	db, err := platform.NewDB(ctx, cfg.DatabaseURL)
+	db, err := platform.NewDB(ctx, cfg.DatabaseURL, 1)
 	if err != nil {
 		return err
 	}

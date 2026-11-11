@@ -17,6 +17,7 @@ import (
 
 	"github.com/gavinadlan/racego/backend/internal/auth"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 	"github.com/gavinadlan/racego/backend/internal/ratelimit"
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 	"github.com/gavinadlan/racego/backend/internal/turnstile"
@@ -302,12 +303,22 @@ func (r *Runner) Tick(ctx context.Context, now time.Time) (admitted int, errs []
 		}
 		r.events, r.loaded = events, now
 	}
+	var size, active int
+	var oldest time.Duration
 	for _, ev := range r.events {
 		n, err := r.q.Tick(ctx, ev, now)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("antrian event %s: %w", ev.ID, err))
 		}
 		admitted += n
+		// Angka untuk metrik (jumlah semua event, tanpa label per event). Gagal baca = lewati putaran ini.
+		if s, age, err := r.q.gauges(ctx, ev.ID, now); err == nil {
+			size, active, oldest = size+s.QueueSize, active+s.Active, max(oldest, age)
+		}
 	}
+	metrics.QueueAdmitted.Add(float64(admitted))
+	metrics.QueueSize.Set(float64(size))
+	metrics.QueueActive.Set(float64(active))
+	metrics.QueueOldestSeen.Set(oldest.Seconds())
 	return admitted, errs
 }

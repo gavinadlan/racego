@@ -17,6 +17,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/kyc"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/participant"
 	"github.com/gavinadlan/racego/backend/internal/partner"
@@ -78,7 +79,7 @@ func NewRouter(d Deps) http.Handler {
 	}
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, realIP(d.Cfg.TrustedProxyHops), middleware.Recoverer)
+	r.Use(metrics.HTTP, middleware.RequestID, realIP(d.Cfg.TrustedProxyHops), middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
 	r.Use(cors(d.Cfg.FrontendURL))
 	r.Use(auth.Middleware(sessions.Lookup, d.Cfg.FrontendURL, d.Cfg.IsDev()))

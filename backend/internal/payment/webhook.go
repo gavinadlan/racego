@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gavinadlan/racego/backend/internal/httpx"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 )
 
 var ErrBadSignature = errors.New("signature notifikasi tidak valid")
@@ -88,7 +89,16 @@ func (p *Processor) processVerified(ctx context.Context, n Notification, raw []b
 	if err != nil {
 		return "", err
 	}
-	return outcome, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	switch outcome {
+	case OutcomePaid:
+		metrics.Orders.WithLabelValues("paid").Inc()
+	case OutcomeReleased:
+		metrics.Orders.WithLabelValues("released").Inc()
+	}
+	return outcome, nil
 }
 
 func (p *Processor) markPaid(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, n Notification) (Outcome, error) {

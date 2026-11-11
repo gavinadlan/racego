@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 )
 
 type Config struct {
@@ -43,6 +45,14 @@ type Config struct {
 	MailFrom     string
 
 	Turnstile TurnstileConfig
+
+	// Listener metrik Prometheus, terpisah dari server publik. Kosong = mati. API memakai METRICS_ADDR,
+	// worker WORKER_METRICS_ADDR (port berbeda). Non-loopback wajib MetricsToken.
+	MetricsAddr       string
+	WorkerMetricsAddr string
+	MetricsToken      string
+	// DBMaxConns: ukuran pool Postgres per proses (DB_MAX_CONNS, bawaan 20).
+	DBMaxConns int
 
 	// ScanManifestTTL: masa berlaku data scanner offline di perangkat (SCAN_MANIFEST_TTL_HOURS, default 24).
 	ScanManifestTTL time.Duration
@@ -145,15 +155,19 @@ func Load() Config {
 			PassTTL:      getDuration("QUEUE_PASS_TTL", 10*time.Minute),
 			HeartbeatTTL: getDuration("QUEUE_HEARTBEAT_TTL", 45*time.Second),
 		},
-		AutoVerifyOrgs:  getBool("AUTO_VERIFY_ORGS", env == "development"),
-		UploadDir:       get("UPLOAD_DIR", "./data/uploads"),
-		KYCEncKey:       os.Getenv("KYC_ENC_KEY"),
-		KYCDir:          get("KYC_DIR", "./data/kyc"),
-		SMTPAddr:        get("SMTP_ADDR", "localhost:1025"),
-		SMTPUsername:    os.Getenv("SMTP_USERNAME"),
-		SMTPPassword:    os.Getenv("SMTP_PASSWORD"),
-		MailFrom:        get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
-		ScanManifestTTL: time.Duration(strictInt("SCAN_MANIFEST_TTL_HOURS", 24, 1)) * time.Hour,
+		AutoVerifyOrgs:    getBool("AUTO_VERIFY_ORGS", env == "development"),
+		UploadDir:         get("UPLOAD_DIR", "./data/uploads"),
+		KYCEncKey:         os.Getenv("KYC_ENC_KEY"),
+		KYCDir:            get("KYC_DIR", "./data/kyc"),
+		SMTPAddr:          get("SMTP_ADDR", "localhost:1025"),
+		SMTPUsername:      os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:      os.Getenv("SMTP_PASSWORD"),
+		MailFrom:          get("MAIL_FROM", "RaceGo <no-reply@racego.local>"),
+		ScanManifestTTL:   time.Duration(strictInt("SCAN_MANIFEST_TTL_HOURS", 24, 1)) * time.Hour,
+		MetricsAddr:       os.Getenv("METRICS_ADDR"),
+		WorkerMetricsAddr: os.Getenv("WORKER_METRICS_ADDR"),
+		MetricsToken:      os.Getenv("METRICS_TOKEN"),
+		DBMaxConns:        int(strictInt("DB_MAX_CONNS", 20, 1)),
 		Turnstile: TurnstileConfig{
 			SiteKey:   os.Getenv("TURNSTILE_SITE_KEY"),
 			SecretKey: os.Getenv("TURNSTILE_SECRET_KEY"),
@@ -176,6 +190,11 @@ func (c Config) Validate() error {
 	}
 	if (c.Turnstile.SiteKey == "") != (c.Turnstile.SecretKey == "") {
 		errs = append(errs, errors.New("TURNSTILE_SITE_KEY dan TURNSTILE_SECRET_KEY harus diisi berpasangan (atau dikosongkan keduanya untuk mematikan Turnstile)"))
+	}
+	for name, addr := range map[string]string{"METRICS_ADDR": c.MetricsAddr, "WORKER_METRICS_ADDR": c.WorkerMetricsAddr} {
+		if err := metrics.CheckAddr(name, addr, c.MetricsToken); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }

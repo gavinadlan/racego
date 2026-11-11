@@ -1,0 +1,53 @@
+# Observabilitas LOKAL dan OPSIONAL (docs/11-performa.md): Prometheus + Grafana OSS untuk melihat
+# metrik API/worker saat development atau uji beban. Semua open source, tanpa akun, tanpa data keluar.
+# Bukan bagian dari stack produksi: tidak dipakai make prod-up, tidak perlu di VPS kecil.
+# Jalankan: make obs-up (membuat .env.obs berisi kata sandi acak Grafana) … make obs-down.
+#
+# Prometheus membaca listener metrik proses di host (METRICS_ADDR=127.0.0.1:9464 untuk API,
+# WORKER_METRICS_ADDR=127.0.0.1:9465 untuk worker) lewat host.docker.internal.
+name: racego-obs
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --storage.tsdb.retention.size=512MB
+    volumes:
+      - ./deploy/obs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana-oss:13.0.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?jalankan lewat make obs-up (membuat .env.obs)}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Tidak ada yang dikirim keluar: tanpa telemetri, cek pembaruan, feed berita, atau katalog plugin.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/racego.json
+    volumes:
+      - ./deploy/obs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/obs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+    mem_limit: 512m
+
+volumes:
+  promdata:
+  grafanadata:

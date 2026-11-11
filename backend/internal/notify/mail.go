@@ -10,6 +10,8 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 )
 
 // sendTimeout membatasi satu pengiriman (dial sampai QUIT); kode OTP dikirim langsung dari request API.
@@ -24,6 +26,16 @@ func NewMailer(addr, user, pass, from string) *Mailer {
 }
 
 func (m *Mailer) Send(to, subject, htmlBody string) error {
+	err := m.send(to, subject, htmlBody)
+	if err != nil {
+		metrics.Emails.WithLabelValues("failed").Inc()
+	} else {
+		metrics.Emails.WithLabelValues("sent").Inc()
+	}
+	return err
+}
+
+func (m *Mailer) send(to, subject, htmlBody string) error {
 	from, err := mail.ParseAddress(m.from)
 	if err != nil {
 		return fmt.Errorf("MAIL_FROM tidak valid: %w", err)

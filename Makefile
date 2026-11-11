@@ -6,10 +6,11 @@ export
 
 .DEFAULT_GOAL := help
 .PHONY: help setup up down logs migrate seed db-reset grant verify superadmin dev-release keygen api worker web dev test test-backend lint-web build loadtest queue-demo queue-load \
+	loadtest-up loadtest-seed loadtest-clean obs-up obs-down \
 	prod-build prod-up prod-down prod-logs prod-migrate prod-seed prod-grant prod-verify prod-superadmin backup restore demo demo-down
 
 help: ## Tampilkan daftar perintah
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 setup: ## Sekali di awal: buat .env, unduh dependensi Go & npm
 	@test -f .env || (cp .env.example .env && echo "• .env dibuat dari .env.example")
@@ -73,8 +74,31 @@ build: ## Build binary backend & frontend produksi
 	cd backend && CGO_ENABLED=0 go build -o bin/ ./cmd/...
 	cd frontend && npm run build
 
-loadtest: ## Uji beban war tiket dengan k6 (butuh k6 terpasang)
-	k6 run loadtest/war-tiket.js
+# ===== Uji beban & observabilitas lokal (semua gratis, panduan: docs/11-performa.md) =====
+# Memakai Postgres/Redis/Mailpit khusus (docker-compose.loadtest.yml) dan API+worker khusus di :18080;
+# data development dan .env tidak dipakai. USERS/QUOTA di sini tidak mewarisi bawaan queue-load.
+lt = $(if $(filter command line environment,$(origin $(1))),$($(1)),$(2))
+SCENARIO ?= war
+
+loadtest-up: ## Uji beban: siapkan Postgres/Redis/Mailpit khusus + skema (terpisah dari data dev)
+	@loadtest/run.sh up
+
+loadtest-seed: ## Uji beban: pengguna sintetis + event uji: make loadtest-seed USERS=500 QUOTA=500 QUEUE=true
+	@loadtest/run.sh start && USERS=$(call lt,USERS,100) QUOTA=$(call lt,QUOTA,) loadtest/run.sh seed
+
+loadtest: ## Uji beban k6: make loadtest SCENARIO=browse|war|war-noqueue|soak USERS=500 [CHAOS=redis|worker]
+	@USERS=$(call lt,USERS,100) QUOTA=$(call lt,QUOTA,) loadtest/run.sh run $(SCENARIO)
+
+loadtest-clean: ## Uji beban: hentikan proses, hapus DB/Redis uji, data sintetis, dan loadtest/results/
+	@loadtest/run.sh clean
+
+obs-up: ## Prometheus + Grafana lokal (opsional): http://127.0.0.1:3001, user admin, sandi di .env.obs
+	@test -f .env.obs || (umask 077 && echo "GRAFANA_ADMIN_PASSWORD=$$(openssl rand -hex 16)" > .env.obs && echo "• .env.obs dibuat (kata sandi admin Grafana, tidak masuk Git)")
+	@docker compose -f docker-compose.obs.yml --env-file .env.obs up -d --wait
+	@echo "Grafana http://127.0.0.1:3001 (admin / lihat .env.obs) · Prometheus http://127.0.0.1:9090"
+
+obs-down: ## Matikan Prometheus + Grafana dan hapus datanya
+	@GRAFANA_ADMIN_PASSWORD=x docker compose -f docker-compose.obs.yml down -v
 
 queue-demo: ## Event demo ber-antrian (kuota 50, buka 3 menit lagi); butuh make dev
 	node scripts/queue-sim.mjs demo

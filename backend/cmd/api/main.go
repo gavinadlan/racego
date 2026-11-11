@@ -16,6 +16,7 @@ import (
 
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 	"github.com/gavinadlan/racego/backend/internal/notify"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 	"github.com/gavinadlan/racego/backend/internal/platform"
@@ -49,7 +50,7 @@ func run() error {
 		return errors.New("KYC_DIR tidak boleh berada di dalam UPLOAD_DIR (folder unggahan publik)")
 	}
 
-	db, err := platform.NewDB(ctx, cfg.DatabaseURL)
+	db, err := platform.NewDB(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return err
 	}
@@ -69,6 +70,14 @@ func run() error {
 		return err
 	}
 	inv := checkout.NewInventory(rdb)
+
+	// Metrik di listener sendiri (METRICS_ADDR, kosong = mati); tidak pernah di server publik.
+	metrics.RegisterPool(db)
+	if ln, err := metrics.Start("METRICS_ADDR", cfg.MetricsAddr, cfg.MetricsToken, cfg.IsDev()); err != nil {
+		return err
+	} else if ln != nil {
+		defer ln.Close()
+	}
 
 	var snap payment.SnapClient
 	if cfg.MidtransMock() {

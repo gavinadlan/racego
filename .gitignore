@@ -24,8 +24,9 @@ npm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 
-# hasil uji beban
+# hasil uji beban (berisi token sesi sintetis) & kata sandi Grafana lokal
 loadtest/results/
+.env.obs
 
 # deploy
 .env.prod

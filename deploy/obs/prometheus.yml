@@ -1,0 +1,13 @@
+# Prometheus lokal (docker-compose.obs.yml). Target = listener metrik proses di host.
+# Bila METRICS_TOKEN dipakai, tambahkan di tiap job:  authorization: { credentials_file: /path/token }
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ["host.docker.internal:9464"]
+  - job_name: worker
+    static_configs:
+      - targets: ["host.docker.internal:9465"]

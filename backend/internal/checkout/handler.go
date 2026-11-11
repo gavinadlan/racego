@@ -21,6 +21,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/auth"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
 	"github.com/gavinadlan/racego/backend/internal/ledger"
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 	"github.com/gavinadlan/racego/backend/internal/payment"
 )
 
@@ -140,11 +141,13 @@ func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	if cat.EventStatus != "published" || now.Before(cat.SaleOpenAt) || !now.Before(cat.SaleCloseAt) {
 		// Status event di cache paling lama basi categoryCacheTTL (3 detik) setelah mitra menutup penjualan.
+		metrics.Reservations.WithLabelValues("sale_not_open").Inc()
 		httpx.Error(w, http.StatusConflict, "sale_not_open", "Penjualan kategori ini sedang tidak dibuka")
 		return
 	}
 
 	if cat.WaitingRoom && !h.queuePass(w, r, cat, userID.String(), now) {
+		metrics.Reservations.WithLabelValues("queue_rejected").Inc()
 		return
 	}
 
@@ -161,12 +164,16 @@ func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case errors.Is(err, ErrSoldOut):
+		metrics.Reservations.WithLabelValues("sold_out").Inc()
 		httpx.Error(w, http.StatusConflict, "sold_out", "Maaf, kuota kategori ini sudah habis")
 	case errors.Is(err, ErrLimitExceeded):
+		metrics.Reservations.WithLabelValues("limit_exceeded").Inc()
 		httpx.Error(w, http.StatusConflict, "limit_exceeded", fmt.Sprintf("Maksimal %d slot per akun untuk kategori ini", cat.MaxPerUser))
 	case err != nil:
+		metrics.Reservations.WithLabelValues("error").Inc()
 		httpx.Internal(w, r, err)
 	default:
+		metrics.Reservations.WithLabelValues("ok").Inc()
 		if cat.WaitingRoom {
 			// Slot sudah aman: kembalikan kapasitas antrian. Untuk kategori lain pembeli antri lagi.
 			if err := h.queue.ReleasePass(r.Context(), cat.EventID.String(), userID.String()); err != nil {
@@ -353,6 +360,7 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metrics.Orders.WithLabelValues("created").Inc()
 	resp := OrderResponse{OrderID: orderID, Status: "pending", Total: subtotal, ExpiresAt: expiresAt, Qty: hold.Qty}
 	snapRes, err := h.snap.CreateTransaction(ctx, payment.SnapRequest{
 		OrderID:       orderID.String(),

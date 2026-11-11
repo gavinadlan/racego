@@ -1,0 +1,52 @@
+# Infra khusus UJI BEBAN lokal (docs/11-performa.md): Postgres, Redis, dan Mailpit sendiri, terpisah
+# total dari data development (proyek, port, dan volume berbeda). Tidak dipakai make up / make prod-up.
+# Jalankan lewat Makefile: make loadtest-up … make loadtest-clean (menghapus volumenya).
+# Semua port hanya di 127.0.0.1.
+name: racego-loadtest
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: racego
+      POSTGRES_PASSWORD: racego
+      POSTGRES_DB: racego_loadtest
+    # pg_stat_statements: mencari kueri panas saat penyetelan (hanya di sini, bukan di produksi).
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all"]
+    ports:
+      - "127.0.0.1:55439:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U racego -d racego_loadtest"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    # Sama dengan produksi: AOF menyala, kunci stok tidak boleh dibuang.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6381:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Penangkap email tiket: tidak ada email yang keluar dari mesin ini.
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_MAX_MESSAGES: 500
+    ports:
+      - "127.0.0.1:1026:1025"
+      - "127.0.0.1:8026:8025"
+
+volumes:
+  pgdata:
+  redisdata:

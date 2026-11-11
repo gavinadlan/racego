@@ -8,14 +8,20 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/gavinadlan/racego/backend/internal/metrics"
 )
 
-func NewDB(ctx context.Context, url string) (*pgxpool.Pool, error) {
+// NewDB membuka pool Postgres. maxConns ≤ 0 = bawaan 20.
+func NewDB(ctx context.Context, url string, maxConns int) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
 	}
 	cfg.MaxConns = 20
+	if maxConns > 0 {
+		cfg.MaxConns = int32(maxConns)
+	}
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -38,6 +44,7 @@ func NewRedis(ctx context.Context, addr, password string) (*redis.Client, error)
 		ReadTimeout:  2 * time.Second,
 		WriteTimeout: 2 * time.Second,
 	})
+	rdb.AddHook(metrics.RedisHook{})
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
