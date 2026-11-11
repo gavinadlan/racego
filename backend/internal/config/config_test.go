@@ -87,3 +87,21 @@ func TestMetricsAddrNonLoopbackNeedsToken(t *testing.T) {
 		t.Fatalf("loopback tanpa token harus sah")
 	}
 }
+
+// DB_MAX_CONNS (penyetelan pool, docs/11-performa.md): bawaan tetap 20; nilai ngawur menolak start,
+// bukan diam-diam jadi pool tak terbatas atau nol.
+func TestDBMaxConns(t *testing.T) {
+	if c := Load(); c.DBMaxConns != 20 || c.Validate() != nil {
+		t.Fatalf("bawaan harus 20, dapat %d", c.DBMaxConns)
+	}
+	t.Setenv("DB_MAX_CONNS", "50")
+	if c := Load(); c.DBMaxConns != 50 || c.Validate() != nil {
+		t.Fatalf("DB_MAX_CONNS=50 harus diterima, dapat %d", c.DBMaxConns)
+	}
+	for _, bad := range []string{"0", "-5", "banyak", "1e9"} {
+		t.Setenv("DB_MAX_CONNS", bad)
+		if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), "DB_MAX_CONNS") {
+			t.Fatalf("DB_MAX_CONNS=%q harus ditolak, dapat: %v", bad, err)
+		}
+	}
+}

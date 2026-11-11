@@ -8,7 +8,7 @@ brew install go node k6 cloudflared
 brew install --cask orbstack        # atau Docker Desktop; keduanya menyediakan `docker compose`
 ```
 
-Versi minimal: Go 1.27 (`backend/go.mod` memasang `toolchain go1.27.3`: Go ≥ 1.21 yang lebih lama otomatis mengunduhnya), Node.js 20, Docker Compose v2. Image produksi (`backend/Dockerfile`) dan CI memakai Go 1.27.3 yang sama.
+Versi minimal: Go 1.27 (`backend/go.mod` memasang `toolchain go1.27.4`: Go ≥ 1.21 yang lebih lama otomatis mengunduhnya), Node.js 20, Docker Compose v2. Image produksi (`backend/Dockerfile`) dan CI memakai Go 1.27.3 yang sama.
 
 ## Pertama kali
 
@@ -41,7 +41,8 @@ make dev        # API :8080, worker, web :3000
 | Lihat dokumen verifikasi (terenkripsi) | folder `backend/data/kyc/` (`KYC_DIR`, tidak di-commit; isinya ciphertext) |
 | Lihat gambar unggahan | folder `backend/data/uploads/` (`UPLOAD_DIR`, tidak di-commit) |
 | Data contoh terasa basi | `make db-reset` — tanggal seed relatif terhadap hari ini |
-| Uji beban | `make db-reset && make loadtest` (event tanpa antrian, butuh k6) |
+| Uji beban (k6 di Docker, infra terpisah dari data dev) | `make loadtest-up`, lalu `make loadtest SCENARIO=browse\|war\|war-noqueue\|soak USERS=500`; selesai: `make loadtest-clean`. Lihat bagian *Uji beban & metrik* |
+| Lihat metrik saat development | `make api METRICS_ADDR=127.0.0.1:9464`, `make worker WORKER_METRICS_ADDR=127.0.0.1:9465`, `make obs-up` → Grafana http://127.0.0.1:3001 |
 | Coba antrian virtual di browser | `make dev`, lalu `make queue-demo` (event demo kuota 50, penjualan 3 menit lagi) dan `node scripts/queue-sim.mjs bots --users 500 --event <id>` |
 | Uji beban antrian virtual | `make queue-load` (10.000 pengguna palsu, kuota 200; ubah dengan `USERS=… QUOTA=…`). Menyalakan API & worker sendiri di port 18080 |
 
@@ -114,6 +115,24 @@ Masuk sebagai owner/admin/staf race pack → event → **Scan race pack** → *S
 - **Playwright** (di folder di luar repo): `context.setOffline(true/false)`, satu context per perangkat, `page.clock.install()` + `clock.fastForward("25:00:00")` untuk menguji kedaluwarsa, `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=qr.y4m` untuk jalur kamera (video QR dibuat dengan `ffmpeg -loop 1 -i qr.png -t 3 -pix_fmt yuv420p qr.y4m`).
 - Masa berlaku data: `SCAN_MANIFEST_TTL_HOURS` (bawaan 24). Tes backend: `internal/server/offline_scan_test.go` (manifest: peran, minimisasi kunci JSON, `?since`, 10.000 tiket; batch: idempoten, paralel dua perangkat, QR palsu, event salah, refund, batas).
 
+## Uji beban & metrik
+
+Hasil pengukuran dan cara membacanya: [11-performa.md](11-performa.md). Ringkas cara pakainya:
+
+```bash
+make loadtest-up                         # Postgres :55439, Redis :6381, Mailpit :8026 khusus uji (proyek racego-loadtest)
+make obs-up                              # opsional: Prometheus :9090 + Grafana :3001 (admin / sandi di .env.obs)
+make loadtest SCENARIO=browse VUS=50
+make loadtest SCENARIO=war USERS=500     # juga war-noqueue, soak; CHAOS=redis|worker untuk gangguan
+make loadtest-clean && make obs-down     # hapus DB/Redis uji, hasil, dan data Prometheus/Grafana
+```
+
+- `make loadtest` menyalakan API + worker sendiri di `127.0.0.1:18080` dengan lingkungan bersih (`env -i`): `.env`-mu tidak dibaca, pembayaran selalu mock, email ke Mailpit uji. Butuh Docker saja; k6 tidak perlu dipasang (image `grafana/k6`).
+- Pengguna sintetis dibuat `migrate loadgen-seed` langsung di database uji. Perintah itu menolak `APP_ENV` selain `development` dan database yang namanya bukan `*_loadtest`.
+- Sesudah tiap `war*`/`soak`, `migrate loadgen-check` memeriksa oversell, BIB ganda, batas per pembeli, ledger, stok Redis vs database, dan outbox. Gagal = `make loadtest` gagal. Hasil mentah di `loadtest/results/` (tidak masuk Git, berisi token sesi sintetis).
+- **Metrik**: `METRICS_ADDR` (API) dan `WORKER_METRICS_ADDR` (worker) membuka `/metrics` di listener terpisah; kosong = mati. Di development listener itu juga menyajikan `/debug/pprof/` (`go tool pprof http://127.0.0.1:9464/debug/pprof/profile?seconds=20`). Aturan label (tanpa ID, email, token, IP) dijaga `TestMetricsOutputSafe`; menambah metrik baru = pakai label dari himpunan tetap saja.
+- `make test` menulis ke database di `DATABASE_URL`. Supaya data dev tidak tersentuh: `make test RACEGO_TEST_DATABASE_URL=postgres://racego:racego@localhost:55439/racego_test?sslmode=disable` setelah membuat dan memigrasi database itu di Postgres uji.
+
 ## Menjalankan versi produksi
 
 Untuk mencoba stack produksi (Docker Compose + Caddy, HTTPS lokal) atau men-deploy ke server, lihat [10-deploy.md](10-deploy.md). Singkatnya: `cp .env.prod.example .env.prod && scripts/gen-secrets.sh`, biarkan `SITE_ADDRESS=localhost`, lalu `make prod-up` dan buka https://localhost (sertifikat lokal Caddy; browser akan memperingatkan). `make demo` membukanya ke internet lewat Cloudflare quick tunnel. Stack produksi memakai proyek Docker `racego-prod` dan volume sendiri, jadi tidak mengganggu `make up`.
@@ -142,7 +161,7 @@ CI (`.github/workflows/ci.yml`) menjalankan migrasi + seed di Postgres baru, `go
 | Tetap "belum masuk" setelah login | `FRONTEND_URL` harus persis origin web (mis. `http://localhost:3000`, bukan `127.0.0.1`) agar cookie & CORS cocok |
 | Kamera scanner tidak mau menyala | Browser butuh HTTPS atau `localhost`; dari HP pakai `cloudflared tunnel --url http://localhost:3000` |
 | `go: missing go.sum entry` | Jalankan `cd backend && go mod tidy` |
-| `go: downloading go1.27.3` saat pertama build | Normal: Go lokal lebih lama dari `toolchain` di `go.mod`, jadi toolchain diunduh sekali |
+| `go: downloading go1.27.4` saat pertama build | Normal: Go lokal lebih lama dari `toolchain` di `go.mod`, jadi toolchain diunduh sekali |
 | Scanner: "Penyimpanan offline diblokir" | Mode samaran/izin situs memblokir IndexedDB; scan online tetap jalan |
 | Scanner: "belum mendukung verifikasi tanda tangan Ed25519" | Peramban terlalu lama untuk mode offline (perlu Chrome/Edge 137+, Safari 17+, Firefox 129+) |
 | `make db-reset` gagal karena ledger | Reset memakai migrasi `down` (DROP trigger lalu tabel), tidak menghapus baris ledger; hanya jalan di `APP_ENV=development` |

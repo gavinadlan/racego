@@ -92,7 +92,7 @@ cp .env.prod.example .env.prod
 scripts/gen-secrets.sh
 ```
 
-Server tidak perlu Go atau Node: image dibangun di Docker (`golang:1.27.3-alpine`, sama dengan `toolchain` di `backend/go.mod` dan CI; Node 22 untuk frontend).
+Server tidak perlu Go atau Node: image dibangun di Docker (`golang:1.27.4-alpine`, sama dengan `toolchain` di `backend/go.mod` dan CI; Node 22 untuk frontend).
 
 `gen-secrets.sh` mengisi `POSTGRES_USER`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QUEUE_SECRET` (kunci pass antrian virtual), dan `QR_PRIVATE_KEY` dengan nilai acak, tanpa mencetaknya. Untuk `.env.prod` lama yang belum punya `QUEUE_SECRET`, cukup jalankan skrip ini lagi: hanya yang kosong yang diisi. Nilai yang sudah terisi tidak akan ditimpa tanpa konfirmasi.
 
@@ -164,6 +164,17 @@ Hanya satu kunci terisi → API menolak start. Bila Cloudflare tidak terjangkau,
 - Undangan staf memakai SMTP yang sama dengan kode masuk; tautan dibentuk dari `SITE_ADDRESS` (`FRONTEND_URL`). Bila SMTP gagal, undangan tidak dibuat (502) dan bisa dicoba lagi.
 - Sebelum hari-H: staf masuk, buka **Scan race pack**, *Siapkan mode offline* selagi ada sinyal, dan **jangan memuat ulang** halaman saat offline.
 
+## 4d. Opsional: metrik (`METRICS_ADDR`, `METRICS_TOKEN`)
+
+API dan worker bisa menyajikan metrik Prometheus (`/metrics`) di **listener terpisah** dari server publik. Bawaannya **mati** (`METRICS_ADDR` dan `WORKER_METRICS_ADDR` kosong), dan itu yang disarankan di VPS kecil:
+
+- **Prometheus dan Grafana tidak ikut stack produksi.** `docker-compose.prod.yml` tidak menambah service atau memori untuk metrik. `docker-compose.obs.yml` (`make obs-up`) hanya untuk laptop: pengukuran lokal memakai ±40–90 MiB (Prometheus) dan ±130–340 MiB (Grafana), terlalu mahal untuk server 1–2 GB (angka di [11-performa.md](11-performa.md)).
+- **Metrik tidak pernah terbuka ke publik.** Caddy hanya meneruskan `/v1/*`, `/uploads/*`, `/healthz` ke API; `https://SITE_ADDRESS/metrics` dijawab 404. Port metrik tidak dipublikasikan ke host.
+- Bila tetap ingin menyalakannya (mis. dibaca Prometheus di server lain lewat jaringan privat/VPN): isi `METRICS_ADDR=:9464`, `WORKER_METRICS_ADDR=:9465`, dan **wajib** `METRICS_TOKEN` (`openssl rand -hex 32`). Alamat non-loopback tanpa token membuat API/worker menolak start. Pembaca mengirim `Authorization: Bearer <token>`; token salah = 401. Jangan memetakan port itu ke internet.
+- Isi metrik hanya angka agregat dengan label dari himpunan tetap (pola rute, metode, kelas status, topik). Tidak ada user ID, email, slug, ID order, token, atau IP.
+
+Cek cepat setelah deploy: `curl -sk -o /dev/null -w '%{http_code}\n' https://SITE_ADDRESS/metrics` harus `404`.
+
 ## 5. Operasional sehari-hari
 
 | Kebutuhan | Perintah |
@@ -230,6 +241,7 @@ Skrip meminta kamu mengetik `PULIHKAN`. Setelah itu skrip menghentikan api/worke
 - [ ] `QUEUE_SECRET` terisi (≥ 32 karakter, dari `gen-secrets.sh`); tanpa itu api dan worker menolak start.
 - [ ] Password Postgres/Redis acak dari `gen-secrets.sh`; `.env.prod` hanya bisa dibaca pemiliknya (`ls -l .env.prod` → `-rw-------`).
 - [ ] Hanya 22/80/443 terbuka: dari laptop, `nc -zv IP_SERVER 5432` dan `nc -zv IP_SERVER 6379` harus gagal.
+- [ ] `curl -sk -o /dev/null -w '%{http_code}' https://SITE_ADDRESS/metrics` → `404`; `METRICS_ADDR` kosong, atau terisi bersama `METRICS_TOKEN` dan tidak terjangkau dari internet
 - [ ] `PROXY_MODE` dan `TRUSTED_PROXY_HOPS` sesuai topologi (tabel di bawah), lalu `scripts/check-ip-spoof.sh https://SITE_ADDRESS emailmu@gmail.com` → LULUS. Skrip ini mengirim sampai 20 email kode ke `emailmu+ipcekN@…` dan memakai jatah kode IP-mu selama 1 jam.
 - [ ] Turnstile sesuai niat: kedua kunci terisi (widget tampil di **Masuk**) atau keduanya kosong.
 - [ ] Update OS otomatis aktif, login SSH hanya dengan kunci.

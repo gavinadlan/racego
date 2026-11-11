@@ -26,7 +26,7 @@
    "gridPos": {
     "x": 0,
     "y": 0,
-    "w": 12,
+    "w": 8,
     "h": 8
    },
    "fieldConfig": {
@@ -63,7 +63,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "racego_queue_size",
+     "expr": "racego_queue_size{job=\"worker\"}",
      "legendFormat": "di antrean/lobi"
     },
     {
@@ -72,7 +72,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "racego_queue_active_passes",
+     "expr": "racego_queue_active_passes{job=\"worker\"}",
      "legendFormat": "pass aktif"
     }
    ]
@@ -87,9 +87,9 @@
     "uid": "prometheus"
    },
    "gridPos": {
-    "x": 12,
+    "x": 8,
     "y": 0,
-    "w": 12,
+    "w": 8,
     "h": 8
    },
    "fieldConfig": {
@@ -126,22 +126,67 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "rate(racego_queue_admitted_total[30s])",
+     "expr": "rate(racego_queue_admitted_total{job=\"worker\"}[30s])",
      "legendFormat": "admit/s"
-    },
-    {
-     "refId": "B",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "racego_queue_oldest_heartbeat_age_seconds",
-     "legendFormat": "umur tanda hidup tertua (dtk)"
     }
    ]
   },
   {
    "id": 3,
+   "type": "timeseries",
+   "title": "Antrean: umur tanda hidup tertua",
+   "description": "Peserta antrean yang paling lama tidak polling (tab ditutup). Dibuang saat gilirannya tiba.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "racego_queue_oldest_heartbeat_age_seconds{job=\"worker\"}",
+     "legendFormat": "detik"
+    }
+   ]
+  },
+  {
+   "id": 4,
    "type": "timeseries",
    "title": "Reservasi per detik (hasil)",
    "description": "",
@@ -195,7 +240,7 @@
    ]
   },
   {
-   "id": 4,
+   "id": 5,
    "type": "timeseries",
    "title": "Order per detik (peristiwa)",
    "description": "",
@@ -249,7 +294,7 @@
    ]
   },
   {
-   "id": 5,
+   "id": 6,
    "type": "timeseries",
    "title": "Latensi p95 rute utama",
    "description": "",
@@ -303,7 +348,7 @@
    ]
   },
   {
-   "id": 6,
+   "id": 7,
    "type": "timeseries",
    "title": "Latensi p99 rute utama",
    "description": "",
@@ -357,7 +402,7 @@
    ]
   },
   {
-   "id": 7,
+   "id": 8,
    "type": "timeseries",
    "title": "Request per detik (kelas status)",
    "description": "",
@@ -411,9 +456,9 @@
    ]
   },
   {
-   "id": 8,
+   "id": 9,
    "type": "timeseries",
-   "title": "Tingkat error 5xx",
+   "title": "Porsi error (5xx dan 4xx)",
    "description": "",
    "datasource": {
     "type": "prometheus",
@@ -474,7 +519,7 @@
    ]
   },
   {
-   "id": 9,
+   "id": 10,
    "type": "timeseries",
    "title": "Pool koneksi Postgres",
    "description": "",
@@ -546,7 +591,7 @@
    ]
   },
   {
-   "id": 10,
+   "id": 11,
    "type": "timeseries",
    "title": "Pool Postgres: menunggu koneksi",
    "description": "",
@@ -609,7 +654,7 @@
    ]
   },
   {
-   "id": 11,
+   "id": 12,
    "type": "timeseries",
    "title": "Outbox: backlog & umur tertua",
    "description": "",
@@ -681,7 +726,7 @@
    ]
   },
   {
-   "id": 12,
+   "id": 13,
    "type": "timeseries",
    "title": "Outbox diproses per detik",
    "description": "",
@@ -744,7 +789,7 @@
    ]
   },
   {
-   "id": 13,
+   "id": 14,
    "type": "timeseries",
    "title": "Redis: latensi p95 per perintah",
    "description": "",
@@ -798,7 +843,7 @@
    ]
   },
   {
-   "id": 14,
+   "id": 15,
    "type": "timeseries",
    "title": "Redis: error per detik",
    "description": "",
@@ -852,7 +897,7 @@
    ]
   },
   {
-   "id": 15,
+   "id": 16,
    "type": "timeseries",
    "title": "Memori proses",
    "description": "",
@@ -915,7 +960,7 @@
    ]
   },
   {
-   "id": 16,
+   "id": 17,
    "type": "timeseries",
    "title": "Goroutine & GC",
    "description": "",
@@ -978,7 +1023,7 @@
    ]
   },
   {
-   "id": 17,
+   "id": 18,
    "type": "timeseries",
    "title": "Worker: durasi langkah p95",
    "description": "",
@@ -1032,7 +1077,7 @@
    ]
   },
   {
-   "id": 18,
+   "id": 19,
    "type": "timeseries",
    "title": "Pencairan & refund per status",
    "description": "",

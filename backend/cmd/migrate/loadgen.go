@@ -179,6 +179,7 @@ func loadgenCheck(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, env 
 	seedPath := fs.String("seed", "", "berkas keluaran loadgen-seed (wajib)")
 	drain := fs.Duration("drain", 2*time.Minute, "batas menunggu outbox kosong")
 	settle := fs.Duration("settle", 0, "batas menunggu hold & order pending habis (0 = tidak menunggu)")
+	converge := fs.Duration("converge", 60*time.Second, "batas menunggu stok Redis konvergen (rekonsiliasi worker)")
 	jsonOut := fs.String("json", "", "tulis hasil sebagai JSON ke berkas ini")
 	_ = fs.Parse(args)
 	raw, err := os.ReadFile(*seedPath)
@@ -296,33 +297,45 @@ func loadgenCheck(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, env 
 	add("d2 satu jurnal order.paid per order lunas", paidOrders == journals && orphan == 0,
 		"order lunas %d, jurnal %d, jurnal untuk order tidak lunas %d", paidOrders, journals, orphan)
 
-	// (e) Redis vs DB: stok + slot ditahan + terjual = kuota, per kategori.
-	mismatch := 0
-	var recon []string
-	for _, c := range seed.Categories {
-		base := "{cat:" + c.ID.String() + "}"
-		stock, e := rdb.Get(ctx, base+":stock").Int()
-		if e != nil && !errors.Is(e, redis.Nil) {
-			return e
+	// (e) Redis vs DB: stok + slot ditahan + terjual = kuota, per kategori. Rekonsiliasi stok di worker
+	// (checkout.StockReconciler) berjalan tiap 15 dtk dan butuh dua putaran, jadi selisih akibat Redis
+	// yang kehilangan tulisan boleh bertahan sampai --converge sebelum dinyatakan gagal.
+	reconcile := func() (mismatch int, detail string, rerr error) {
+		var recon []string
+		for _, c := range seed.Categories {
+			base := "{cat:" + c.ID.String() + "}"
+			stock, e := rdb.Get(ctx, base+":stock").Int()
+			if e != nil && !errors.Is(e, redis.Nil) {
+				return 0, "", e
+			}
+			rids, e := rdb.ZRange(ctx, base+":holds", 0, -1).Result()
+			if e != nil {
+				return 0, "", e
+			}
+			held := 0
+			for _, rid := range rids {
+				v, _ := rdb.Get(ctx, base+":hold:"+rid).Result()
+				_, q, _ := strings.Cut(v, "|")
+				n, _ := strconv.Atoi(q)
+				held += n
+			}
+			sold := int(count(`SELECT coalesce(sum(qty), 0) FROM orders WHERE category_id = $1 AND status = 'paid'`, c.ID))
+			if stock+held+sold != c.Quota {
+				mismatch++
+			}
+			recon = append(recon, fmt.Sprintf("%s stok %d + ditahan %d + terjual %d = %d (kuota %d)", c.Code, stock, held, sold, stock+held+sold, c.Quota))
 		}
-		rids, e := rdb.ZRange(ctx, base+":holds", 0, -1).Result()
-		if e != nil {
-			return e
-		}
-		held := 0
-		for _, rid := range rids {
-			v, _ := rdb.Get(ctx, base+":hold:"+rid).Result()
-			_, q, _ := strings.Cut(v, "|")
-			n, _ := strconv.Atoi(q)
-			held += n
-		}
-		sold := int(count(`SELECT coalesce(sum(qty), 0) FROM orders WHERE category_id = $1 AND status = 'paid'`, c.ID))
-		if stock+held+sold != c.Quota {
-			mismatch++
-		}
-		recon = append(recon, fmt.Sprintf("%s stok %d + ditahan %d + terjual %d = %d (kuota %d)", c.Code, stock, held, sold, stock+held+sold, c.Quota))
+		return mismatch, strings.Join(recon, "; "), nil
 	}
-	add("e stok Redis = kuota − terjual − ditahan", mismatch == 0, "%s", strings.Join(recon, "; "))
+	mismatch, recon, rerr := reconcile()
+	for end := time.Now().Add(*converge); rerr == nil && mismatch > 0 && time.Now().Before(end); {
+		time.Sleep(5 * time.Second)
+		mismatch, recon, rerr = reconcile()
+	}
+	if rerr != nil {
+		return rerr
+	}
+	add("e stok Redis = kuota − terjual − ditahan", mismatch == 0, "%s", recon)
 
 	// (f) tidak ada order pending tanpa hold aktif; outbox bersih.
 	var pendingRIDs []struct {

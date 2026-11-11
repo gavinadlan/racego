@@ -29,6 +29,9 @@ export const options = {
 
 export function setup() {
   guard();
+  // Tunggu penjualan benar-benar terbuka (+ cache kategori server ≤3 dtk); sebelumnya 15 reservasi awal
+  // ditolak sale_not_open dan dihitung "unexpected" padahal itu jawaban sah.
+  sleep(Math.max((meta.sale_open_at + 4000 - Date.now()) / 1000, 0));
 }
 
 export function browse() {

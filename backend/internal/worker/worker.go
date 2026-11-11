@@ -43,6 +43,7 @@ type Worker struct {
 	reconciler  *payment.Reconciler // nil di mode mock
 	queue       *queue.Runner
 	finance     *finance.Service
+	stock       *checkout.StockReconciler
 }
 
 // WithFinance mengaktifkan rilis saldo (tiap jam) serta eksekusi & cek status pencairan/refund.
@@ -64,7 +65,7 @@ func (w *Worker) WithReconciler(r *payment.Reconciler) *Worker {
 }
 
 func New(db *pgxpool.Pool, inv *checkout.Inventory, signer *ticket.Signer, mailer *notify.Mailer, frontendURL string) *Worker {
-	return &Worker{db: db, inv: inv, signer: signer, mailer: mailer, frontendURL: frontendURL}
+	return &Worker{db: db, inv: inv, signer: signer, mailer: mailer, frontendURL: frontendURL, stock: checkout.NewStockReconciler(db, inv)}
 }
 
 // Run berjalan sampai ctx dibatalkan.
@@ -99,6 +100,11 @@ func (w *Worker) Run(ctx context.Context) {
 		case <-holds.C:
 			metrics.Step("expire_orders", func() { w.expireOrders(ctx) })
 			metrics.Step("release_holds", func() { w.releaseExpiredHolds(ctx) })
+			metrics.Step("reconcile_stock", func() {
+				if _, err := w.stock.Run(ctx); err != nil {
+					slog.ErrorContext(ctx, "rekonsiliasi stok", "err", err)
+				}
+			})
 		case <-sync.C:
 			metrics.Step("sync_stock", func() { w.syncStock(ctx) })
 		case <-money.C:

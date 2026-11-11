@@ -42,7 +42,7 @@ flowchart TB
 | `event` | Katalog publik (hanya event terbit dari mitra terverifikasi), ringkasan penjualan mitra |
 | `partner` | Portal mitra: daftar penyelenggara, profil, CRUD event & kategori, terbitkan/tutup, anggota tim, undangan staf via email (token SHA-256, email dikirim langsung di dalam transaksi), audit |
 | `upload` | Validasi & simpan gambar (poster, logo) di balik antarmuka `Storage` (sekarang disk lokal) |
-| `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order, rilis saldo tiap jam, eksekusi & cek status pencairan/refund tiap 15 detik), dan pemanggilan antrian tiap detik di goroutine terpisah |
+| `worker` | Memproses outbox dan job berkala (muat stok, kembalikan slot, expire order, rilis saldo tiap jam, eksekusi & cek status pencairan/refund tiap 15 detik), rekonsiliasi stok Redis tiap 15 detik (menjepit stok yang melebihi kuota − order aktif), dan pemanggilan antrian tiap detik di goroutine terpisah |
 | `auth` | Login email + OTP, sesi cookie, profil `/me`, middleware identitas & CSRF |
 | `notify` | Email tiket & kode masuk (SMTP, batas waktu 10 detik) |
 

@@ -48,6 +48,11 @@ var (
 		Name: "racego_orders_total", Help: "Peristiwa order: dibuat, lunas, dilepas gateway, kedaluwarsa.",
 	}, []string{"event"})
 
+	StockClamped = f.NewCounter(prometheus.CounterOpts{
+		Name: "racego_stock_clamped_slots_total",
+		Help: "Slot stok Redis yang diturunkan paksa karena melebihi kuota − order aktif (tanda Redis kehilangan tulisan).",
+	})
+
 	QueueAdmitted = f.NewCounter(prometheus.CounterOpts{
 		Name: "racego_queue_admitted_total", Help: "Peserta antrean yang dipanggil (semua event).",
 	})

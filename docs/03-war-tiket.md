@@ -109,17 +109,20 @@ Default ini untuk server kecil (2 CPU). Naikkan `QUEUE_ADMIT_PER_SEC`/`QUEUE_MAX
 | `{cat:<id>}:confirmed:<rid>` | Penanda sudah dikonfirmasi (idempotensi) |
 | `inventory:categories` | SET kategori yang dipantau worker |
 
-Redis dijalankan dengan `appendonly yes` dan `noeviction` agar kuota tidak hilang atau terbuang saat memori penuh. Bila data Redis tetap hilang, `SyncCategory` menghitung ulang stok = kuota − slot order pending/lunas.
+Redis dijalankan dengan `appendonly yes` dan `noeviction` agar kuota tidak hilang atau terbuang saat memori penuh. Bila data Redis tetap hilang, `SyncCategory` menghitung ulang stok = kuota − slot order pending/lunas. Bila Redis hanya kehilangan tulisan terakhir (crash dengan AOF `everysec` kehilangan ≤1 detik), pengurangan stok yang hilang membuat stok terlalu longgar: worker menjalankan `StockReconciler` tiap 15 detik yang **menurunkan** stok ke kuota − slot order aktif bila kelebihan terlihat dua putaran berturut-turut (tidak pernah menaikkan). Ditemukan lewat uji chaos, lihat [11-performa.md](11-performa.md#bug-yang-ditemukan-stok-redis-lebih-longgar-dari-kuota-setelah-crash).
 
 ## Mengukur
 
-Event **tanpa** antrian (reservasi langsung), dengan k6:
+Alur lengkap (antrean → reservasi → order → bayar mock → tiket terbit) dengan k6, di infra terpisah dari data development, plus pemeriksaan integritas otomatis. Angka dan temuan ada di [11-performa.md](11-performa.md):
 
 ```bash
-make db-reset
-make loadtest                                  # default 500 req/detik ke kategori 21K (kuota 200)
-k6 run -e RATE=2000 loadtest/war-tiket.js      # naikkan bertahap
+make loadtest-up
+make loadtest SCENARIO=war USERS=500           # event ber-antrean; naikkan bertahap (2000, 5000)
+make loadtest SCENARIO=war-noqueue USERS=2000  # tanpa antrean: kenapa antrean ada, dan bukti tetap nol oversell
+make loadtest-clean
 ```
+
+Uji lama yang hanya menembak endpoint reservasi (`loadtest/war-tiket.js`) digantikan `war-noqueue`, yang memakai sesi sungguhan dan melanjutkan sampai tiket terbit.
 
 Event **dengan** antrian, dengan `scripts/queue-sim.mjs` (Node, tanpa dependensi; hanya mau jalan terhadap API development di localhost karena memakai `X-User-ID`):
 
@@ -160,6 +163,6 @@ Hasil `make queue-load` di mesin pengembangan (Apple M2 8 core, RAM 16 GB, macOS
 
 9.782 pengguna masih menunggu saat simulasi berhenti: stok habis tapi 200 hold belum dibayar (simulasi tidak membayar). Angka ini dari satu mesin dengan klien dan server berbagi CPU; di server 2 CPU latensi akan lebih tinggi. Yang tidak boleh berubah adalah kebenarannya: reservasi ≤ kuota, tidak ada yang dipanggil dua kali.
 
-Threshold k6: `reserved_ok <= kuota`, tidak ada error tak terduga, p95 reservasi < 300 ms. Hasil uji di laptop/VM kecil wajar lebih lambat; yang tidak boleh gagal adalah kebenaran data (oversell = 0).
+Threshold k6 (`loadtest/war.js`): tiket terbit ≤ kuota, tidak ada error tak terduga, p95 reservasi < 300 ms. Hasil uji di laptop/VM kecil wajar lebih lambat; yang tidak boleh gagal adalah kebenaran data (oversell = 0).
 
 Uji pembanding saat scaffolding (satu container kecil, klien & server di mesin yang sama): 3.000 request dari 300 koneksi serentak ke kuota 200 → **200 sukses, 2.800 sold out, 0 error**, p95 ±340 ms.

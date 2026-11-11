@@ -46,7 +46,9 @@ running() { [[ -f "$RESULTS/$1.pid" ]] && kill -0 "$(cat "$RESULTS/$1.pid")" 2>/
 start_one() { # api | worker
   running "$1" && return 0
   ulimit -n 65536 2>/dev/null || ulimit -n 10240 # ribuan koneksi bersamaan (bawaan macOS hanya 256)
-  (cd "$ROOT/backend" && nohup "${backend_env[@]}" "./bin/$1" >>"$RESULTS/$1.log" 2>&1 & echo $! >"$RESULTS/$1.pid")
+  # exec: PID yang dicatat adalah biner itu sendiri, bukan shell pembungkus.
+  (cd "$ROOT/backend" && exec nohup "${backend_env[@]}" "./bin/$1" >>"$RESULTS/$1.log" 2>&1) &
+  echo $! >"$RESULTS/$1.pid"
 }
 
 stop_one() {
@@ -84,7 +86,7 @@ case "$cmd" in
     ;;
   check) # SETTLE=4m menunggu hold/order yang ditinggal habis
     (cd "$ROOT/backend" && "${backend_env[@]}" ./bin/migrate loadgen-check --seed "$RESULTS/seed.json" \
-      --settle "${SETTLE:-0}" --json "$RESULTS/${NAME:-check}-integrity.json")
+      --settle "${SETTLE:-0}" --converge "${CONVERGE:-60s}" --json "$RESULTS/${NAME:-check}-integrity.json")
     ;;
   run) # run <browse|war|war-noqueue|soak>; CHAOS=redis|redis-kill|worker untuk gangguan saat war
     scenario="${1:?pemakaian: run.sh run <browse|war|war-noqueue|soak>}"

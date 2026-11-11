@@ -60,6 +60,9 @@ x-backend: &backend
     IRIS_BASE_URL: ${IRIS_BASE_URL:-https://app.sandbox.midtrans.com/iris/api/v1}
     IRIS_CREATOR_KEY: ${IRIS_CREATOR_KEY:-}
     IRIS_APPROVER_KEY: ${IRIS_APPROVER_KEY:-}
+    # Metrik Prometheus (opsional, bawaan mati). Tidak ada port yang dibuka dan Caddy tidak meneruskannya;
+    # alamat non-loopback wajib METRICS_TOKEN. Lihat docs/10-deploy.md.
+    METRICS_TOKEN: ${METRICS_TOKEN:-}
 
 services:
   postgres:
@@ -120,6 +123,7 @@ services:
       # Anti-bot Turnstile (OTP & masuk antrean). Kosong keduanya = mati; hanya satu terisi = API menolak start.
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      METRICS_ADDR: ${METRICS_ADDR:-}
     volumes:
       - uploads:/data/uploads
       - kyc:/data/kyc
@@ -144,6 +148,7 @@ services:
       <<: *backend-env
       # Worker membuka nomor rekening pencairan (terenkripsi) tepat sebelum dikirim ke gateway.
       KYC_ENC_KEY: ${KYC_ENC_KEY:?jalankan scripts/gen-secrets.sh}
+      WORKER_METRICS_ADDR: ${WORKER_METRICS_ADDR:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

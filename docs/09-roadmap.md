@@ -50,7 +50,10 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Enkripsi data scanner offline dengan PIN
 - [ ] Halaman scanner yang bisa dimuat ulang tanpa internet (service worker; menunggu dukungan offline resmi Next.js)
 - [ ] QR dinamis hari-H
-- [ ] Observabilitas: OpenTelemetry → Prometheus/Grafana, dashboard live war tiket
+- [x] Metrik dasar: `/metrics` Prometheus di listener terpisah (HTTP per pola rute, reservasi, antrean, order, outbox, pool DB, Redis, email, pencairan/refund), dashboard Grafana lokal opsional (`make obs-up`)
+- [x] Uji beban k6 dengan angka: `browse`, `war`, `war-noqueue`, `soak`, chaos ringan, pemeriksaan integritas otomatis; hasil di [11-performa.md](11-performa.md)
+- [ ] Sisa observabilitas: alerting (Alertmanager), tracing terdistribusi (OpenTelemetry), log terpusat, metrik per event untuk mitra
+- [ ] Uji beban dari mesin terpisah dan lewat jaringan nyata (sekarang generator dan server berbagi CPU)
 - [x] CI GitHub Actions: tes backend dengan Postgres, lint/build frontend, build image
 - [x] Paket deploy satu server: Docker Compose + Caddy (HTTPS otomatis), backup/restore teruji, `make demo` via Cloudflare quick tunnel
 - [ ] Deploy otomatis (CD) dari GitHub ke server
@@ -70,6 +73,6 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [x] Tiket QR Ed25519 + BIB otomatis + email
 - [x] Scanner race pack (kamera, manual, anti dobel scan) + isolasi multi-tenant
 - [x] Ledger double-entry
-- [x] Skrip uji beban k6
+- [x] Skrip uji beban k6 (diganti skenario lengkap di `loadtest/`, lihat Fase 3)
 - [x] Beranda baru, kalender bulanan/daftar, arsip, direktori & profil penyelenggara, halaman untuk penyelenggara
 - [x] Identitas visual RaceGo (motif BIB)

@@ -23,11 +23,14 @@ var (
 	confirmSrc string
 	//go:embed lua/adjust.lua
 	adjustSrc string
+	//go:embed lua/clamp.lua
+	clampSrc string
 
 	reserveScript = redis.NewScript(reserveSrc)
 	releaseScript = redis.NewScript(releaseSrc)
 	confirmScript = redis.NewScript(confirmSrc)
 	adjustScript  = redis.NewScript(adjustSrc)
+	clampScript   = redis.NewScript(clampSrc)
 )
 
 var (
@@ -111,6 +114,16 @@ func (inv *Inventory) AdjustStock(ctx context.Context, categoryID string, delta 
 		return int(res[1]), true, ErrBelowUsed
 	}
 	return int(res[1]), true, nil
+}
+
+// ClampStock menurunkan stok ke maxStock bila stok sekarang lebih besar (atomik); tidak pernah menaikkan.
+// before = stok sebelum dijepit; clamped=false bila stok sudah ≤ maxStock atau belum dimuat.
+func (inv *Inventory) ClampStock(ctx context.Context, categoryID string, maxStock int) (before int, clamped bool, err error) {
+	res, err := clampScript.Run(ctx, inv.rdb, []string{keysFor(categoryID).stock()}, maxStock).Int64Slice()
+	if err != nil {
+		return 0, false, err
+	}
+	return int(res[1]), res[0] == 1, nil
 }
 
 // Drop menghapus stok kategori dari Redis (kategori/event dihapus sebelum ada order).

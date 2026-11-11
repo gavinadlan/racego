@@ -16,18 +16,20 @@ RaceGo/
 │   └── migrations/     skema SQL + seed data contoh
 ├── frontend/           Web Next.js 16 (pelari, dashboard mitra, scanner race pack)
 ├── docs/               PRD, arsitektur, war tiket, pembayaran, tiket QR, infra gratis, API, deploy, ADR
-├── loadtest/           Skrip k6 uji beban war tiket
+├── loadtest/           Uji beban k6: browse · war · war-noqueue · soak + pemeriksaan integritas
 ├── deploy/Caddyfile    Reverse proxy produksi (HTTPS otomatis, header keamanan)
+├── deploy/obs/         Prometheus + dashboard Grafana lokal (opsional, bukan bagian produksi)
 ├── scripts/            gen-secrets · backup · restore · demo · check-ip-spoof · queue-sim
 ├── docker-compose.yml       Postgres · Redis · Mailpit untuk development
 ├── docker-compose.prod.yml  Stack produksi lengkap (caddy, web, api, worker, postgres, redis)
+├── docker-compose.loadtest.yml · docker-compose.obs.yml   Infra uji beban & observabilitas lokal
 ├── .github/workflows/  CI: tes backend + Postgres, build frontend, build image
 └── Makefile            Semua perintah sehari-hari (`make help`)
 ```
 
 ## Mulai cepat (macOS)
 
-Prasyarat: **Go ≥ 1.27** (go.mod memakai toolchain go1.27.3; Go yang lebih lama mengunduhnya otomatis), **Node.js ≥ 20**, **Docker** (Docker Desktop / OrbStack / Colima). Detail di [docs/08-development.md](docs/08-development.md).
+Prasyarat: **Go ≥ 1.27** (go.mod memakai toolchain go1.27.4; Go yang lebih lama mengunduhnya otomatis), **Node.js ≥ 20**, **Docker** (Docker Desktop / OrbStack / Colima). Detail di [docs/08-development.md](docs/08-development.md).
 
 ```bash
 make setup     # buat .env, unduh dependensi Go & npm (sekali saja)
@@ -62,7 +64,8 @@ Email tiket tertangkap di Mailpit: http://localhost:8025. Postgres berjalan di p
 | `make verify ORG=…` | Jalan pintas: verifikasi penyelenggara tanpa pengajuan (bila `AUTO_VERIFY_ORGS=false`) |
 | `make dev-release ORG=…` | Development: rilis saldo tertahan mitra tanpa menunggu masa tahan (uji pencairan) |
 | `make keygen` | Buat kunci Ed25519 untuk tanda tangan QR |
-| `make loadtest` | Uji beban war tiket dengan k6 |
+| `make loadtest-up` / `make loadtest SCENARIO=… USERS=…` / `make loadtest-clean` | Uji beban k6 di infra terpisah + pemeriksaan integritas otomatis ([hasil](docs/11-performa.md)) |
+| `make obs-up` / `make obs-down` | Prometheus + Grafana lokal untuk melihat metrik (opsional) |
 | `make queue-demo` / `make queue-load` | Event demo ber-antrian untuk dicoba di browser / uji beban antrian virtual (10.000 pengguna palsu) |
 | `make prod-up` / `make demo` | Stack produksi di server / demo dari laptop (lihat [Deploy](#deploy)) |
 
@@ -95,7 +98,8 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Verifikasi mitra: dokumen & rekening terenkripsi, peninjauan super admin `/admin` | Rotasi kunci enkripsi |
 | Tiket QR bertanda tangan Ed25519 + BIB otomatis | Enkripsi data scanner offline (PIN), refund parsial/massal |
 | Scanner race pack (kamera, manual, anti dobel scan, mode offline + sinkron) | Row-Level Security Postgres |
-| Ledger double-entry append-only + email tiket | Observabilitas (Grafana) |
+| Ledger double-entry append-only + email tiket | Alerting, tracing, log terpusat |
+| Metrik Prometheus + dashboard Grafana lokal; uji beban k6 terukur ([docs/11-performa.md](docs/11-performa.md)) | Uji beban dari mesin terpisah / jaringan nyata |
 | Keuangan mitra: saldo tertahan/tersedia, pencairan maker-checker (mock / Midtrans Payouts), refund per order, laporan CSV, cek integritas ledger; daftar & export CSV peserta per event; anti-bot Turnstile opsional (OTP & antrean) | Rekonsiliasi settlement Midtrans, kuota kembali setelah refund |
 
 Dokumen PRD & arsitektur lengkap: [docs/](docs/README.md).
