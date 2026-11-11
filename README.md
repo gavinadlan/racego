@@ -6,6 +6,37 @@ Platform tiket event lari **multi-penyelenggara**: banyak company/komunitas menj
 
 > Proyek pribadi / portofolio. Infra 100% gratis, pembayaran memakai Midtrans **sandbox** atau mode **mock**.
 
+![RaceGo](docs/img/screenshots/cover.png)
+
+## Sorotan
+
+- **War tiket yang tahan beban:** antrian virtual + reservasi stok atomik di Redis (Lua). Diuji k6 dengan 5.000 pengguna berebut 500 tiket: 0 error 5xx, 0 oversell, p95 reservasi 1,8 ms dengan antrean ([hasil](docs/11-performa.md)).
+- **Tiket tidak pernah melebihi kuota** walau Redis crash: pagar kuota di database, rekonsiliasi stok, dan uji `SIGKILL`/`FLUSHALL` ([docs/03](docs/03-war-tiket.md)).
+- **QR bertanda tangan Ed25519 + scanner offline:** pengambilan race pack dan absen hari-H tanpa internet, sinkron batch idempoten, bentrokan antar-perangkat masuk "Perlu ditinjau".
+- **Undian doorprize yang adil:** hanya peserta yang benar-benar hadir, diundi di server dengan `crypto/rand`, hash kumpulan peserta tercatat ([docs/12](docs/12-undian.md)).
+- **Multi-tenant + KYC:** peran owner/admin/keuangan/staf, dokumen verifikasi terenkripsi AES-256-GCM, peninjauan super admin.
+- **Keuangan:** ledger double-entry append-only (dijaga trigger), pencairan maker-checker, refund, laporan CSV.
+- **Bisa diamati:** metrik Prometheus dan dashboard Grafana, semuanya berjalan di infra gratis.
+
+## Tampilan
+
+Semua data di gambar ini fiktif.
+
+| | |
+| --- | --- |
+| ![Detail event](docs/img/screenshots/event-detail.png) | ![Tiket saya](docs/img/screenshots/tickets.png) |
+| Detail event dan pilihan kategori | Tiket QR dengan nomor BIB |
+| ![Dashboard penyelenggara](docs/img/screenshots/organizer-dashboard.png) | ![Keuangan](docs/img/screenshots/finance.png) |
+| Dashboard penyelenggara | Saldo, pencairan, dan mutasi |
+| ![Scanner absen hari-H](docs/img/screenshots/scanner-attendance.png) | ![Scanner offline](docs/img/screenshots/scanner-offline.png) |
+| Scanner absen hari-H di HP | Mode offline dengan antrean sinkron |
+| ![Layar undian](docs/img/screenshots/draw-stage.png) | ![Peninjauan verifikasi](docs/img/screenshots/admin-review.png) |
+| Layar panggung undian doorprize | Antrean verifikasi mitra (super admin) |
+
+![Dashboard Grafana saat uji beban](docs/img/screenshots/load-test.png)
+
+Dashboard Grafana saat war tiket 1.500 pengguna. Lonjakan 4xx sekitar 3–4% adalah jawaban "kuota habis", bukan galat server.
+
 ## Isi repo
 
 ```
@@ -93,8 +124,8 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Reservasi atomik Redis + timer + pengembalian kuota; **pagar kuota di database** (tiket tidak pernah melebihi kuota walau Redis rusak) + rekonsiliasi stok/batas per pembeli ([docs/03](docs/03-war-tiket.md#pelindung-berlapis-tugas-11)) | Anti multi-akun, ballot (Turnstile opsional sudah ada) |
 | Antrian virtual opsional per event (lobi diundi, pemanggilan bertahap, pass HMAC) | Antrian lintas event |
 | Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan ke Iris sandbox sungguhan (klien teruji server palsu), ganti rekening |
-| Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |
-| Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim | Kupon & harga bertahap |
+| Webhook idempotent + verifikasi signature + outbox | Undangan massal (CSV) |
+| Portal mitra: daftar penyelenggara, buat/terbitkan event, poster & logo, tim, undangan staf via email | Kupon & harga bertahap |
 | Verifikasi mitra: dokumen & rekening terenkripsi, peninjauan super admin `/admin` | Rotasi kunci enkripsi |
 | Tiket QR bertanda tangan Ed25519 + BIB otomatis | Enkripsi data scanner offline (PIN), refund parsial/massal |
 | Scanner race pack + absen hari-H (kamera, manual, anti dobel scan, mode offline + sinkron); undian doorprize spin BIB ([docs/12-undian.md](docs/12-undian.md)) | Row-Level Security Postgres |
