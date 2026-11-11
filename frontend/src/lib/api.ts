@@ -748,3 +748,50 @@ export type ParticipantSummary = { total: number; attended: number; by_category:
 export type AttendanceSettings = { opens_at: string | null; closes_at: string | null; effective_opens_at: string; effective_closes_at: string; open: boolean };
 export const cancelAttendance = (base: string, ticketId: string, reason: string) =>
   apiFetch<{ ok: boolean }>(`${base}/attend/cancel`, { method: "POST", body: { ticket_id: ticketId, reason } });
+
+// Undian doorprize (Tugas 10, Bagian B). Pemenang ditentukan server; klien hanya menampilkan.
+export type DrawSettings = { draw_eligibility: "attended" | "collected"; allow_multiple_wins: boolean; draw_public: boolean; locked: boolean };
+export type DrawPrize = {
+  id: string;
+  name: string;
+  quantity: number;
+  category_id: string | null;
+  category_code: string | null;
+  position: number;
+  drawn: number;
+  winners: number;
+  remaining: number;
+};
+export type DrawWinner = {
+  id: string;
+  prize_id: string;
+  prize_name: string;
+  seq: number;
+  bib: string;
+  name: string; // nama lengkap: hanya panel panitia
+  display_name: string; // nama depan: layar panggung
+  category: string;
+  status: "winner" | "claimed" | "forfeited";
+  drawn_at: string;
+  pool_size: number;
+  pool_hash: string;
+  note?: string;
+};
+export type DrawPool = {
+  eligibility: "attended" | "collected";
+  total: number;
+  attended: number;
+  by_category: { id: string; code: string; name: string; count: number }[];
+  draw_opens_at: string;
+  draw_open: boolean;
+  attendance_closes_at: string;
+};
+export type PublicDrawResults = { event: string; prizes: { name: string; winners: { seq: number; bib: string; first_name: string; category: string }[] }[] };
+
+export const drawPath = (base: string, rest = "") => `${base}/draw${rest}`;
+/** key: kunci idempoten per klik; kirim ulang dengan key yang sama tidak mengundi lagi. */
+export const drawPrize = (base: string, prizeId: string, key: string, body: { count?: number; all?: boolean } = { count: 1 }) =>
+  apiFetch<{ winners: DrawWinner[]; replayed: boolean }>(drawPath(base, `/prizes/${prizeId}/draw`), { method: "POST", body, headers: { "Idempotency-Key": key } });
+export const claimWinner = (base: string, id: string) => apiFetch<DrawWinner>(drawPath(base, `/winners/${id}/claim`), { method: "POST" });
+export const forfeitWinner = (base: string, id: string, reason: string) =>
+  apiFetch<DrawWinner>(drawPath(base, `/winners/${id}/forfeit`), { method: "POST", body: { reason } });

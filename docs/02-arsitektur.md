@@ -59,6 +59,10 @@ Aturan dependensi: modul boleh saling impor ke arah "bawah" saja (`checkout` →
 
 Staf mengunduh manifest event (nama, BIB, kategori, jersey, status + kunci publik QR) ke IndexedDB perangkat (`frontend/src/lib/offline-store.ts`). Saat offline, QR diverifikasi di peramban dengan WebCrypto Ed25519 (`lib/qr-verify.ts`) dan "tandai diambil" masuk antrean lokal; saat online antrean dikirim ke `POST …/scan/batch`, yang memverifikasi ulang dan memakai UPDATE atomik yang sama dengan scan online (yang pertama diproses server menang; sisanya bentrokan untuk ditinjau). Halaman scanner tidak bisa dimuat ulang tanpa internet (tidak ada service worker; alasannya di [05-tiket-qr-dan-scan](05-tiket-qr-dan-scan.md#memuat-ulang-tanpa-internet-keputusan-tidak-didukung)).
 
+## Absen hari-H & undian
+
+`tickets.attended_at/attended_by` (absen, terpisah dari `status`) membentuk kolam undian. Modul `internal/draw` memilih pemenang di server (`crypto/rand`) dari snapshot kolam di dalam satu transaksi di bawah advisory lock per event (`ticket.LockEventDraw`, dipakai juga oleh pembatalan absen); `draw_winners` append-only (trigger) dengan `pool_size`/`pool_hash` untuk audit. Layar panggung di frontend hanya menganimasikan hasil server. Lihat [12-undian](12-undian.md).
+
 ## Antrian virtual
 
 Opsional per event (`events.waiting_room`). Pembeli login masuk lobi `QUEUE_LOBBY_MINUTES` sebelum penjualan; pada jam buka urutan lobi = skor acak yang diberikan saat bergabung. Worker memanggil peserta tiap detik (laju & batas pass aktif) dan membuang yang berhenti polling. Yang dipanggil mendapat pass HMAC; `checkout.Reserve` mewajibkan header `X-Queue-Pass` untuk event itu dan melepas pass setelah reservasi berhasil. Semua status antrian ada di Redis (hash tag `{ev:<id>}`), tanpa query Postgres per polling (info event di-cache 3 detik di API, daftar event aktif dibaca worker tiap 10 detik). Detail, batas, dan hasil uji: [03-war-tiket](03-war-tiket.md#antrian-virtual-waiting-room).

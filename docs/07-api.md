@@ -51,6 +51,8 @@ Aturan kode: 6 digit, berlaku 10 menit, sekali pakai, maks 5 percobaan salah. Ki
 | GET | `/uploads/{name}` | Gambar unggahan (`<sha256>.jpg|png`); `Cache-Control: public, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`; nama lain → 404 |
 | POST | `/v1/webhooks/midtrans` | HTTP notification Midtrans |
 
+`GET /v1/events/{eventID}/draw-results` (publik): hasil undian (BIB, `first_name`, kategori per hadiah), hanya bila `draw_public`; selain itu 404 `results_not_found`. `X-Robots-Tag: noindex`, cache 10 detik. Detail: [12-undian](12-undian.md).
+
 ## Pelari (wajib login)
 
 | Method | Path | Body / header | Respons penting |
@@ -118,6 +120,17 @@ Objek peserta:
 | GET | `/v1/org/{org}/events/{eventID}/participants/summary` | owner, admin, rpc_staff | tanpa data pribadi: `total`, `by_category` (`key` kode, `label` nama, `id`, `count`; semua kategori event), `by_jersey` (tiket berlaku), `by_status` |
 | GET | `/v1/org/{org}/events/{eventID}/participants?q=&category=&status=&page=` | owner, admin | 50 per halaman: `ticket_id`, `bib`, `name`, `email`, `category`, `jersey_size`, `gender`, `birth_date`, `id_number` (**selalu** `••••1234`), `emergency_name`, `emergency_phone`, `status` (`issued`/`collected`/`refunded`/`cancelled`), `issued_at`, `collected_at`. `q` = nama/email (sebagian) atau BIB (persis). 422 `validation` (`category`, `status`, `q` > 100) |
 | GET | `/v1/org/{org}/events/{eventID}/participants.csv?q=&category=&status=` | owner, admin | CSV di-stream per baris (UTF-8 BOM, `;`, sel teks disanitasi, angka tetap angka): BIB, nama, email, kategori, ukuran jersey, gender, tanggal lahir, nomor identitas tersamar, kontak darurat + telepon, status tiket, waktu terbit/ambil (WIB). Tanpa data pembayaran. `Content-Disposition: attachment; filename="peserta-<slug-event>-<YYYYMMDD>.csv"`, `Cache-Control: no-store`. Tercatat `participants.download` (filter, `rows`; tanpa isi). 429 `too_many_requests` (10 unduhan/menit/akun) |
+| POST | `/v1/org/{org}/events/{eventID}/attend` | owner, admin, rpc_staff | absen hari-H: `{"token"}` atau `{"ticket_id"}`. 200 `result`: `ok` / `already_attended` (`ticket.attended_at`, `attended_by_staff`) / `invalid` / `wrong_event` / `not_found` / `refunded` / `cancelled` · 409 `attend_not_open` (di luar jendela) |
+| POST | `/v1/org/{org}/events/{eventID}/attend/cancel` | owner, admin | `{"ticket_id","reason"}` (5–300) · 409 `not_attended` / `attendance_in_use` (pemenang undian aktif). Audit `attendance.cancelled` |
+| GET / PUT | `/v1/org/{org}/events/{eventID}/attendance/settings` | GET: owner, admin, rpc_staff · PUT: owner, admin | `opens_at`, `closes_at` (`null` = bawaan), `effective_opens_at`, `effective_closes_at`, `open`; 422 bila tutup ≤ buka |
+| GET / PUT | `/v1/org/{org}/events/{eventID}/draw/settings` | GET: + rpc_staff · PUT: owner, admin | `draw_eligibility` (`attended`/`collected`), `allow_multiple_wins`, `draw_public`, `locked`; 409 `settings_locked` bila eligibilitas/satu-menang diubah setelah pemenang pertama |
+| GET / POST | `/v1/org/{org}/events/{eventID}/draw/prizes` | GET: + rpc_staff · POST: owner, admin | hadiah `{"name" 2–100,"quantity" 1–1000,"category_id"?,"position"?}` + `drawn`, `winners`, `remaining`; 422 `fields` · 409 `too_many_prizes` (maks. 100) |
+| PUT / DELETE | `/v1/org/{org}/events/{eventID}/draw/prizes/{prizeID}` | owner, admin | jumlah tidak di bawah pemenang aktif; kategori terkunci setelah ada pemenang; DELETE 409 `prize_has_winners` |
+| GET | `/v1/org/{org}/events/{eventID}/draw/pool` | owner, admin | `total`, `attended`, `by_category`, `draw_open`, `draw_opens_at`; tanpa daftar pribadi |
+| POST | `/v1/org/{org}/events/{eventID}/draw/prizes/{prizeID}/draw` | owner, admin | `{"count":1}` atau `{"all":true}`; header `Idempotency-Key` opsional. 200 `winners[]`, `replayed` · 409 `draw_not_open` / `pool_empty` / `prize_exhausted` · 422 `count`. Tanpa parameter pemilihan manual |
+| GET | `/v1/org/{org}/events/{eventID}/draw/winners` | owner, admin, rpc_staff | semua pemenang + status, `pool_size`, `pool_hash` |
+| POST | `/v1/org/{org}/events/{eventID}/draw/winners/{winnerID}/claim` · `/forfeit` | owner, admin | forfeit `{"reason"}` 5–300 · 409 `invalid_status`; pengganti lewat undi ulang |
+| GET | `/v1/org/{org}/events/{eventID}/draw/results.csv` | owner, admin | CSV aman (hadiah, urutan, BIB, nama, kategori, status, waktu, ukuran kolam, catatan); audit `draw.results.downloaded` |
 
 Bukan anggota → 404 `org_not_found`. Peran tidak cukup → 403 `forbidden`. Event/kategori milik org lain → 404.
 

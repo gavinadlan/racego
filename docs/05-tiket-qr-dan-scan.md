@@ -101,3 +101,12 @@ Service worker yang meng-cache halaman scanner + aset `/_next/static` sudah dico
 
 - QR dinamis (berganti tiap 30 detik) di hari-H agar screenshot tidak bisa dipakai.
 - Enkripsi data offline dengan PIN; halaman scanner yang bisa dimuat ulang tanpa internet (perlu dukungan resmi Next.js untuk offline).
+
+## Absen hari-H
+
+Pengambilan race pack tidak membuktikan peserta ikut lari. Mode scanner **Absen hari-H** (pemilih mode di halaman scanner, dengan penanda besar mode aktif; mode terakhir diingat per event) menandai kehadiran di lokasi lomba: `POST …/attend` (`{token}` atau `{ticket_id}`) mengubah `tickets.attended_at/attended_by` secara atomik (`WHERE status IN ('issued','collected') AND attended_at IS NULL`), tanpa menyentuh `status`/`collected_*`. Hasil: hijau `ok`, kuning `already_attended` (kapan dan oleh siapa), merah `invalid`/`wrong_event`/`not_found`/`refunded`/`cancelled`. Tercatat di `scan_logs` (`kind = 'attend'`; baris lama `collect`).
+
+- **Jendela waktu**: bawaan tanggal lomba (WIB) sampai akhir hari berikutnya; di luar itu 409 `attend_not_open`. Owner/admin dapat menimpa `attendance_opens_at/closes_at` (halaman Undian atau `PUT …/attendance/settings`).
+- **Pembatalan** (salah scan): `POST …/attend/cancel` `{ticket_id, reason 5–300}`, owner/admin saja, audit `attendance.cancelled`; 409 `attendance_in_use` bila tiket pemenang undian aktif.
+- **Offline**: manifest memuat `attended` (+ `attended_at`) per tiket, antrean lokal punya `kind` (`collect|attend`), `POST …/scan/batch` menerima `kind` per entri (bawaan `collect`), tetap idempoten per `client_op_id`. Dua perangkat memindai tiket yang sama: satu `ok`, satu `already_attended` masuk "Perlu ditinjau". Jendela absen dinilai dengan `scanned_at` perangkat saat sinkron. `?since=` menyertakan perubahan absen. Mode ambil race pack tidak berubah.
+- Halaman Peserta: kolom Hadir, filter Hadir/Belum hadir, ringkasan per kategori; CSV peserta punya kolom "Hadir hari-H (waktu)". Absen menjadi dasar kolam undian ([12](12-undian.md)).

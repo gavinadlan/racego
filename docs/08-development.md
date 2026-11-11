@@ -115,6 +115,10 @@ Masuk sebagai owner/admin/staf race pack → event → **Scan race pack** → *S
 - **Playwright** (di folder di luar repo): `context.setOffline(true/false)`, satu context per perangkat, `page.clock.install()` + `clock.fastForward("25:00:00")` untuk menguji kedaluwarsa, `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=qr.y4m` untuk jalur kamera (video QR dibuat dengan `ffmpeg -loop 1 -i qr.png -t 3 -pix_fmt yuv420p qr.y4m`).
 - Masa berlaku data: `SCAN_MANIFEST_TTL_HOURS` (bawaan 24). Tes backend: `internal/server/offline_scan_test.go` (manifest: peran, minimisasi kunci JSON, `?since`, 10.000 tiket; batch: idempoten, paralel dua perangkat, QR palsu, event salah, refund, batas).
 
+## Absen hari-H & undian
+
+Jendela absen bawaan baru dibuka pada tanggal lomba, jadi di development atur salah satu: (a) halaman Undian → kartu **Jendela absen hari-H** (buka kemarin, tutup besok), atau (b) `UPDATE events SET race_date = current_date WHERE id = '…'`. Lalu: beli tiket (mock), buka **Scan race pack** → pilih mode **Absen hari-H** → scan/cari manual; halaman **Peserta** menampilkan kolom Hadir. Di halaman **Undian** (tombol Undian di dashboard) tambah hadiah, cek ringkasan kolam, buka **Layar panggung**, lalu Undi. Emulasi `prefers-reduced-motion` di DevTools (Rendering) untuk menguji tanpa animasi. Tes backend: `internal/server/attend_test.go`, `draw_test.go`, `internal/draw/draw_test.go` (jalankan dengan `RACEGO_TEST_DATABASE_URL`).
+
 ## Uji beban & metrik
 
 Hasil pengukuran dan cara membacanya: [11-performa.md](11-performa.md). Ringkas cara pakainya:

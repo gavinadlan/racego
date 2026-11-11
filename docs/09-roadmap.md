@@ -59,7 +59,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [ ] Deploy otomatis (CD) dari GitHub ke server
 - [ ] Content-Security-Policy, mulai dari mode `Report-Only` (perlu mengizinkan skrip & iframe Midtrans Snap)
 - [ ] Pemantauan stack produksi: uptime check + alert (Grafana, lihat butir observabilitas)
-- [ ] Ballot/undian untuk event super-favorit
+- [x] Absen hari-H (scanner mode absen, offline, jendela waktu) dan undian doorprize spin BIB ([12-undian](12-undian.md))
+- [ ] Sisa undian: ballot/undian tiket untuk event super-favorit, ritual undian dengan komit-ungkap acak publik, undian dengan syarat finis/waktu tempuh, notifikasi pemenang (email/WhatsApp)
 - [ ] Antrian lintas event (satu antrian untuk beberapa event yang dibuka bersamaan)
 - [ ] Halaman tunggu statis dari CDN; notifikasi "giliranmu" lewat email/WhatsApp
 - [ ] Notifikasi WhatsApp

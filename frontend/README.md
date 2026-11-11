@@ -32,8 +32,10 @@ npm run build
 | `/admin/verifikasi/[id]` | Detail pengajuan: data tersamar + "Tampilkan" (tercatat), penanda kecocokan nama rekening, pratinjau dokumen di halaman, anggota, riwayat, daftar periksa, dialog Setujui/Tolak (alasan + penghitung) |
 | `/org/[org]/profil` | Tab **Profil**: deskripsi, kota, instagram, situs, warna, logo (slug tidak bisa diubah) |
 | `/org/[org]/events/new`, `/org/[org]/events/[eventId]/edit` | Form event (`components/event-form.tsx`): informasi, poster, penjualan (WIB), tabel kategori (jadi kartu di HP), pratinjau kartu BIB, Simpan draft / Terbitkan / Tutup penjualan / Hapus draft dengan dialog konfirmasi |
-| `/org/[org]/events/[eventId]/scan` | Scanner race pack (kamera via `@zxing/browser`, input manual, pencarian nama/BIB) + mode offline (`lib/offline-store.ts` IndexedDB, `lib/qr-verify.ts` WebCrypto Ed25519, `lib/offline-scanner.ts` antrean & sinkron). Tidak bisa dimuat ulang saat offline (lihat docs/05) |
+| `/org/[org]/events/[eventId]/scan` | Scanner race pack + mode Absen hari-H (kamera via `@zxing/browser`, input manual, pencarian nama/BIB) + mode offline (`lib/offline-store.ts` IndexedDB, `lib/qr-verify.ts` WebCrypto Ed25519, `lib/offline-scanner.ts` antrean & sinkron). Tidak bisa dimuat ulang saat offline (lihat docs/05) |
 | `/org/[org]/events/[eventId]/peserta` | Peserta: ringkasan (kategori, ukuran jersey, status tiket); owner/admin juga tabel berpaginasi + cari/filter + Unduh CSV. Staf RPC hanya ringkasan |
+| `/org/[org]/events/[eventId]/undian` | Undian doorprize (`components/draw.tsx`): pengaturan kelayakan, jendela absen hari-H, hadiah, kolam, pemenang (Diterima/Tidak hadir), CSV. Tombol **Layar panggung** (`draw-stage.tsx`): reel BIB 4–6 detik dari hasil server, kunci idempoten per klik, hormati `prefers-reduced-motion`. Owner/admin kelola; staf RPC baca |
+| `/events/[eventId]/hasil-undian` | Hasil undian publik (BIB + nama depan + kategori), `noindex`, 404 bila `draw_public` mati |
 
 ## Bahasa visual
 

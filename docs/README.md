@@ -13,6 +13,7 @@
 | [09-roadmap.md](09-roadmap.md) | Yang belum dibuat, urut prioritas |
 | [10-deploy.md](10-deploy.md) | Deploy langkah demi langkah ke server mana pun + demo dari laptop, backup/restore, checklist keamanan |
 | [11-performa.md](11-performa.md) | Metrik, uji beban k6 (angka nyata), integritas di bawah beban, chaos, batasan, peta skala |
+| [12-undian.md](12-undian.md) | Absen hari-H dan undian doorprize: kelayakan, pengacakan, audit `pool_hash`, privasi, batasan |
 | [adr/](adr/) | Catatan keputusan arsitektur (kenapa begini, bukan begitu) |
 
 Versi lengkap PRD (dengan diagram) juga tersedia sebagai dokumen terpisah di Claude: *PRD & Arsitektur — Platform Tiket Event Lari Multi-Penyelenggara*.
