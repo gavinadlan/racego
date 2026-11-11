@@ -2,23 +2,36 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch, ApiError, type ScanResult, type ScanTicket } from "@/lib/api";
+import { apiFetch, ApiError, type AttendanceSettings, type ScanResult, type ScanTicket } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { SKEW_WARN_MS, useOfflineScanner, type LocalResult } from "@/lib/offline-scanner";
-import type { ManifestTicket, QueueEntry } from "@/lib/offline-store";
+import type { ManifestTicket, QueueEntry, QueueKind } from "@/lib/offline-store";
 import { useApi } from "@/lib/use-api";
 import { useNow } from "./clock";
 import { useSession } from "./session";
 import { btnGhost, ErrorBox, Loading, LoginHint, PageTitle } from "./ui";
 import { ConfirmDialog } from "./ui-client";
 
-type Stats = { stats: { issued: number; collected: number }; results: ScanTicket[] | null };
+type Stats = { stats: { issued: number; collected: number; attended: number }; results: ScanTicket[] | null };
 type Shown = (ScanResult | LocalResult) & { result: string };
+type Mode = QueueKind;
+
+// Mode terakhir diingat per event di perangkat ini (bukan data peserta).
+const modeKey = (eventId: string) => `racego-scan-mode:${eventId}`;
+const readMode = (eventId: string): Mode => {
+  try {
+    return window.localStorage.getItem(modeKey(eventId)) === "attend" ? "attend" : "collect";
+  } catch {
+    return "collect";
+  }
+};
 
 // Hijau / kuning / merah besar: dibaca sekilas di bawah matahari, satu tangan.
 const TONE: Record<string, { cls: string; icon: string }> = {
   ok: { cls: "border-emerald-600 bg-emerald-50 text-emerald-950", icon: "✓" },
   already_collected: { cls: "border-amber-500 bg-amber-50 text-amber-950", icon: "!" },
+  already_attended: { cls: "border-amber-500 bg-amber-50 text-amber-950", icon: "!" },
+  attend_not_open: { cls: "border-amber-500 bg-amber-50 text-amber-950", icon: "⏱" },
   not_in_manifest: { cls: "border-amber-500 bg-amber-50 text-amber-950", icon: "?" },
 };
 const RED = { cls: "border-red-600 bg-red-50 text-red-950", icon: "✕" };
@@ -38,12 +51,23 @@ export function Scanner() {
   const off = useOfflineScanner(org, eventId, user, ready);
   const st = off.state;
   const base = `/v1/org/${org}/events/${eventId}`;
+  const [mode, setModeState] = useState<Mode>(() => (typeof window === "undefined" ? "collect" : readMode(eventId)));
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   // Mode offline siap: progres & pencarian dari data lokal, tidak memanggil API.
   const { data, error, reload } = useApi<Stats>(userId && !st.ready ? `${base}/tickets?q=${encodeURIComponent(search)}` : null, [userId, st.ready]);
 
+  const attendance = useApi<AttendanceSettings>(userId && mode === "attend" ? `${base}/attendance/settings` : null, [userId, mode]);
   const [result, setResult] = useState<Shown | null>(null);
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    setResult(null); // hasil dari mode lain tidak boleh terbaca sebagai hasil mode ini
+    try {
+      window.localStorage.setItem(modeKey(eventId), m);
+    } catch {
+      /* penyimpanan diblokir: mode tidak diingat */
+    }
+  };
   const [pickedUpBy, setPickedUpBy] = useState("");
   const [manualToken, setManualToken] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
@@ -80,23 +104,28 @@ export function Scanner() {
       busy.current = true;
       try {
         // Offline siap: selalu verifikasi lokal dulu; antrean dikirim di latar belakang.
-        const local = await off.scanLocal({ ...body, picked_up_by: pickedUpBy });
+        const local = await off.scanLocal({ ...body, picked_up_by: mode === "collect" ? pickedUpBy : undefined }, mode);
         if (local) {
           setResult(local);
           if (local.result === "ok") setPickedUpBy("");
           return;
         }
-        const res = await apiFetch<ScanResult>(`${base}/scan`, { method: "POST", body: { ...body, picked_up_by: pickedUpBy || undefined } });
+        const res = await apiFetch<ScanResult>(`${base}/${mode === "attend" ? "attend" : "scan"}`, {
+          method: "POST",
+          body: mode === "attend" ? body : { ...body, picked_up_by: pickedUpBy || undefined },
+        });
         setResult(res);
         if (res.result === "ok") setPickedUpBy("");
         reload();
       } catch (e) {
-        setResult({ result: "error", message: e instanceof ApiError ? e.message : "Gagal memproses" });
+        // Di luar jendela waktu server membalas 409 attend_not_open: tampil kuning, bukan galat umum.
+        if (e instanceof ApiError && e.code === "attend_not_open") setResult({ result: "attend_not_open", message: e.message });
+        else setResult({ result: "error", message: e instanceof ApiError ? e.message : "Gagal memproses" });
       } finally {
         busy.current = false;
       }
     },
-    [base, pickedUpBy, reload, off],
+    [base, pickedUpBy, reload, off, mode],
   );
 
   // Hasil baru selalu terlihat (HP satu tangan: tanpa menggulir mencari hasil).
@@ -141,20 +170,27 @@ export function Scanner() {
 
   const t = result?.ticket;
   const tone = result ? (TONE[result.result] ?? RED) : null;
-  const progress = st.ready ? { issued: st.issued, collected: st.collected } : data?.stats;
+  const progress = st.ready ? { issued: st.issued, collected: st.collected, attended: st.attended } : data?.stats;
+  const attend = mode === "attend";
   const localResults: ManifestTicket[] = st.ready ? off.search(search) : [];
   const review = st.queue.filter((q) => q.state === "conflict" || q.state === "rejected");
 
   return (
     <>
-      <PageTitle title="Scan race pack" back={{ href: `/org/${org}`, label: "Dashboard mitra" }}>
+      <PageTitle title={attend ? "Absen hari-H" : "Scan race pack"} back={{ href: `/org/${org}`, label: "Dashboard mitra" }}>
         {progress && (
-          <p className="mt-2 text-sm text-muted">
-            Diambil <b className="text-asphalt tabular-nums">{progress.collected}</b> dari {progress.issued} tiket
+          <p className="mt-2 text-sm text-muted" data-testid="progres">
+            {attend ? "Hadir" : "Diambil"} <b className="text-asphalt tabular-nums">{attend ? progress.attended : progress.collected}</b> dari {progress.issued} tiket
             {st.ready && " (data perangkat ini)"}
           </p>
         )}
       </PageTitle>
+      <ModeBar mode={mode} onMode={setMode} />
+      {attend && attendance.data && !attendance.data.open && (
+        <p className="mt-3 rounded-md bg-amber-100 p-3 text-sm font-semibold text-amber-950" data-testid="jendela-absen">
+          Absen hari-H belum/tidak sedang dibuka. Jendela absen: {formatDateTime(attendance.data.effective_opens_at)} sampai {formatDateTime(attendance.data.effective_closes_at)}.
+        </p>
+      )}
       {error && !st.ready && <ErrorBox message={error} />}
 
       <OfflinePanel off={off} now={now} onDialog={setDialog} />
@@ -164,7 +200,7 @@ export function Scanner() {
           {/* Hasil di atas kamera: di HP langsung terlihat tanpa menggulir. */}
           <div ref={resultRef} className={`min-h-32 scroll-mt-24 rounded-md border-4 p-5 ${tone ? tone.cls : "border-dashed border-line bg-card text-muted"}`} role="status" aria-live="assertive" data-result={result?.result}>
             {!result ? (
-              <p>Arahkan kamera ke QR tiket peserta.</p>
+              <p>{attend ? "Arahkan kamera ke QR tiket peserta yang hadir di lokasi lomba." : "Arahkan kamera ke QR tiket peserta."}</p>
             ) : (
               <>
                 <p className="flex items-start gap-3 text-2xl leading-tight font-bold">
@@ -182,9 +218,22 @@ export function Scanner() {
                     <dd className="font-display text-lg font-semibold">
                       {t.category_code} · {t.bib_number}
                     </dd>
-                    <dt>Jersey</dt>
-                    <dd className="text-2xl font-bold">{t.jersey_size}</dd>
-                    {t.collected_at && result.result !== "ok" && (
+                    {!attend && (
+                      <>
+                        <dt>Jersey</dt>
+                        <dd className="text-2xl font-bold">{t.jersey_size}</dd>
+                      </>
+                    )}
+                    {attend && t.attended_at && result.result !== "ok" && (
+                      <>
+                        <dt>Hadir</dt>
+                        <dd>
+                          {formatDateTime(t.attended_at)}
+                          {t.attended_by_staff && ` · oleh ${t.attended_by_staff}`}
+                        </dd>
+                      </>
+                    )}
+                    {!attend && t.collected_at && result.result !== "ok" && (
                       <>
                         <dt>Diambil</dt>
                         <dd>
@@ -196,7 +245,7 @@ export function Scanner() {
                     )}
                   </dl>
                 )}
-                {result.result === "ok" && <p className="mt-4 text-sm">Cocokkan nama dengan KTP sebelum menyerahkan race pack.</p>}
+                {result.result === "ok" && !attend && <p className="mt-4 text-sm">Cocokkan nama dengan KTP sebelum menyerahkan race pack.</p>}
                 {"local" in result && <p className="mt-3 text-xs opacity-70">Diverifikasi di perangkat ({result.ms} ms){result.result === "ok" ? ", menunggu terkirim ke server" : ""}.</p>}
               </>
             )}
@@ -223,10 +272,12 @@ export function Scanner() {
             </button>
           )}
           {cameraError && <ErrorBox message={cameraError} />}
-          <label className="block text-sm">
-            <span className="text-muted">Diwakilkan? Nama pengambil (opsional, berlaku untuk scan berikutnya)</span>
-            <input className="mt-1 min-h-11 w-full rounded-md border border-line bg-card px-3 py-2" value={pickedUpBy} onChange={(e) => setPickedUpBy(e.target.value)} />
-          </label>
+          {!attend && (
+            <label className="block text-sm">
+              <span className="text-muted">Diwakilkan? Nama pengambil (opsional, berlaku untuk scan berikutnya)</span>
+              <input className="mt-1 min-h-11 w-full rounded-md border border-line bg-card px-3 py-2" value={pickedUpBy} onChange={(e) => setPickedUpBy(e.target.value)} />
+            </label>
+          )}
           <form
             className="flex gap-2"
             onSubmit={(e) => {
@@ -271,8 +322,8 @@ export function Scanner() {
             </form>
             <ul className="mt-3 divide-y divide-line text-sm">
               {(st.ready
-                ? localResults.map((r) => ({ id: r.id, name: r.name, cat: r.category, bib: r.bib, status: r.status }))
-                : (data?.results ?? []).map((r) => ({ id: r.id, name: r.participant_name, cat: r.category_code, bib: r.bib_number, status: r.status }))
+                ? localResults.map((r) => ({ id: r.id, name: r.name, cat: r.category, bib: r.bib, status: r.status, attended: r.attended_at }))
+                : (data?.results ?? []).map((r) => ({ id: r.id, name: r.participant_name, cat: r.category_code, bib: r.bib_number, status: r.status, attended: r.attended_at }))
               ).map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-2 py-2">
                   <span className="min-w-0">
@@ -281,7 +332,15 @@ export function Scanner() {
                       {r.cat} · {r.bib}
                     </span>
                   </span>
-                  {r.status === "issued" ? (
+                  {attend ? (
+                    (r.status === "issued" || r.status === "collected") && !r.attended ? (
+                      <button className="min-h-11 shrink-0 rounded-md bg-sky-700 px-3 text-xs font-semibold text-white" onClick={() => submit({ ticket_id: r.id })}>
+                        Tandai hadir
+                      </button>
+                    ) : (
+                      <span className="shrink-0 text-xs text-muted">{r.attended ? "sudah hadir" : r.status}</span>
+                    )
+                  ) : r.status === "issued" ? (
                     <button className="min-h-11 shrink-0 rounded-md bg-hivis px-3 text-xs font-semibold text-asphalt" onClick={() => submit({ ticket_id: r.id })}>
                       Tandai diambil
                     </button>
@@ -417,8 +476,10 @@ function Review({ entries, onDismiss }: { entries: QueueEntry[]; onDismiss: (id:
               <b>{e.name}</b> <span className="font-display">{e.bib}</span>
               <span className="block">
                 {e.state === "conflict"
-                  ? `Sudah diambil lebih dulu${e.server_collected_by ? ` oleh ${e.server_collected_by}` : ""}${e.server_collected_at ? ` pada ${formatDateTime(e.server_collected_at)}` : ""}. Scan di perangkat ini ${formatDateTime(e.scanned_at)}.`
-                  : `Ditolak: ${e.message ?? e.result}`}
+                  ? e.kind === "attend"
+                    ? `Sudah diabsen lebih dulu${e.server_attended_by ? ` oleh ${e.server_attended_by}` : ""}${e.server_attended_at ? ` pada ${formatDateTime(e.server_attended_at)}` : ""}. Absen di perangkat ini ${formatDateTime(e.scanned_at)}.`
+                    : `Sudah diambil lebih dulu${e.server_collected_by ? ` oleh ${e.server_collected_by}` : ""}${e.server_collected_at ? ` pada ${formatDateTime(e.server_collected_at)}` : ""}. Scan di perangkat ini ${formatDateTime(e.scanned_at)}.`
+                  : `Ditolak${e.kind === "attend" ? " (absen)" : ""}: ${e.message ?? e.result}`}
               </span>
             </span>
             <button type="button" className="min-h-11 rounded-md border border-amber-600 px-3 text-sm font-semibold" onClick={() => onDismiss(e.client_op_id)}>
@@ -427,6 +488,36 @@ function Review({ entries, onDismiss }: { entries: QueueEntry[]; onDismiss: (id:
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** Pemilih mode + penanda besar mode aktif: staf tidak boleh salah mode saat antrean panjang. */
+function ModeBar({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
+  const attend = mode === "attend";
+  const btn = (m: Mode, label: string) => (
+    <button
+      type="button"
+      aria-pressed={mode === m}
+      onClick={() => onMode(m)}
+      className={`min-h-12 flex-1 rounded-md border-2 px-4 text-base font-bold ${mode === m ? "border-asphalt bg-asphalt text-white" : "border-line bg-card text-asphalt hover:border-asphalt"}`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <section aria-label="Mode scanner" className="space-y-3">
+      <div role="group" aria-label="Pilih mode" className="flex gap-2">
+        {btn("collect", "Ambil race pack")}
+        {btn("attend", "Absen hari-H")}
+      </div>
+      <p
+        data-testid="mode-aktif"
+        data-mode={mode}
+        className={`rounded-md px-4 py-3 text-center font-display text-2xl leading-none font-extrabold tracking-wide uppercase ${attend ? "bg-sky-700 text-white" : "bg-hivis text-asphalt"}`}
+      >
+        Mode: {attend ? "Absen hari-H" : "Ambil race pack"}
+      </p>
     </section>
   );
 }

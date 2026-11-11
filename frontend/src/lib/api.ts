@@ -216,10 +216,12 @@ export type ScanTicket = {
   collected_at?: string;
   collected_by_staff?: string;
   picked_up_by?: string;
+  attended_at?: string; // absen hari-H
+  attended_by_staff?: string;
 };
 
 export type ScanResult = {
-  result: "ok" | "already_collected" | "invalid" | "wrong_event" | "not_found" | "refunded" | "cancelled" | "error";
+  result: "ok" | "already_collected" | "already_attended" | "attend_not_open" | "invalid" | "wrong_event" | "not_found" | "refunded" | "cancelled" | "error";
   message: string;
   ticket?: ScanTicket;
 };
@@ -737,6 +739,12 @@ export type EventParticipant = {
   status: "issued" | "collected" | "refunded" | "cancelled";
   issued_at: string;
   collected_at: string | null;
+  attended_at: string | null; // absen hari-H
 };
-type Count = { key: string; label?: string; id?: string; count: number };
-export type ParticipantSummary = { total: number; by_category: (Count & { id: string; label: string })[]; by_jersey: Count[]; by_status: Count[] };
+type Count = { key: string; label?: string; id?: string; count: number; attended?: number };
+export type ParticipantSummary = { total: number; attended: number; by_category: (Count & { id: string; label: string })[]; by_jersey: Count[]; by_status: Count[] };
+
+// Absen hari-H (Tugas 10): jendela waktu + pembatalan.
+export type AttendanceSettings = { opens_at: string | null; closes_at: string | null; effective_opens_at: string; effective_closes_at: string; open: boolean };
+export const cancelAttendance = (base: string, ticketId: string, reason: string) =>
+  apiFetch<{ ok: boolean }>(`${base}/attend/cancel`, { method: "POST", body: { ticket_id: ticketId, reason } });

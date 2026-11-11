@@ -150,6 +150,8 @@ type ScanTicket struct {
 	CollectedAt     *time.Time `json:"collected_at,omitempty"`
 	CollectedByName *string    `json:"collected_by_staff,omitempty"`
 	PickedUpBy      *string    `json:"picked_up_by,omitempty"`
+	AttendedAt      *time.Time `json:"attended_at,omitempty"`
+	AttendedBy      *string    `json:"attended_by_staff,omitempty"`
 }
 
 type ScanResponse struct {
@@ -242,13 +244,16 @@ func scan(ctx context.Context, db dbtx, signer *Signer, orgID, eventID, staffID 
 func ticketDetail(ctx context.Context, db dbtx, ticketID, eventID, orgID uuid.UUID) (ScanTicket, error) {
 	var t ScanTicket
 	err := db.QueryRow(ctx, `
-		SELECT t.id, p.full_name, c.code, t.bib_number, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name
+		SELECT t.id, p.full_name, c.code, t.bib_number, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name,
+		       t.attended_at, ua.name
 		FROM tickets t
 		JOIN participants p ON p.id = t.participant_id
 		JOIN ticket_categories c ON c.id = t.category_id
 		LEFT JOIN users u ON u.id = t.collected_by
+		LEFT JOIN users ua ON ua.id = t.attended_by
 		WHERE t.id = $1 AND t.event_id = $2 AND t.org_id = $3`, ticketID, eventID, orgID,
-	).Scan(&t.ID, &t.Participant, &t.CategoryCode, &t.BibNumber, &t.JerseySize, &t.Status, &t.CollectedAt, &t.CollectedByName, &t.PickedUpBy)
+	).Scan(&t.ID, &t.Participant, &t.CategoryCode, &t.BibNumber, &t.JerseySize, &t.Status, &t.CollectedAt, &t.CollectedByName, &t.PickedUpBy,
+		&t.AttendedAt, &t.AttendedBy)
 	return t, err
 }
 
@@ -266,10 +271,11 @@ func (h *Handler) EventTickets(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "event_not_found", "Event tidak ditemukan")
 		return
 	}
-	var issued, collected int
+	var issued, collected, attended int
 	if err := h.db.QueryRow(r.Context(), `
-		SELECT count(*) FILTER (WHERE status IN ('issued', 'collected')), count(*) FILTER (WHERE status = 'collected')
-		FROM tickets WHERE event_id = $1 AND org_id = $2`, eventID, m.OrgID).Scan(&issued, &collected); err != nil {
+		SELECT count(*) FILTER (WHERE status IN ('issued', 'collected')), count(*) FILTER (WHERE status = 'collected'),
+		       count(*) FILTER (WHERE status IN ('issued', 'collected') AND attended_at IS NOT NULL)
+		FROM tickets WHERE event_id = $1 AND org_id = $2`, eventID, m.OrgID).Scan(&issued, &collected, &attended); err != nil {
 		httpx.Internal(w, r, err)
 		return
 	}
@@ -277,11 +283,13 @@ func (h *Handler) EventTickets(w http.ResponseWriter, r *http.Request) {
 	var list []ScanTicket
 	if q != "" {
 		rows, err := h.db.Query(r.Context(), `
-			SELECT t.id, p.full_name, c.code, t.bib_number, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name
+			SELECT t.id, p.full_name, c.code, t.bib_number, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name,
+			       t.attended_at, ua.name
 			FROM tickets t
 			JOIN participants p ON p.id = t.participant_id
 			JOIN ticket_categories c ON c.id = t.category_id
 			LEFT JOIN users u ON u.id = t.collected_by
+			LEFT JOIN users ua ON ua.id = t.attended_by
 			WHERE t.event_id = $1 AND t.org_id = $2
 			  AND (p.full_name ILIKE '%' || $3 || '%' OR t.bib_number = $3 OR right(p.id_number, 4) = $3)
 			ORDER BY p.full_name LIMIT 20`, eventID, m.OrgID, q)
@@ -291,7 +299,8 @@ func (h *Handler) EventTickets(w http.ResponseWriter, r *http.Request) {
 		}
 		list, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (ScanTicket, error) {
 			var t ScanTicket
-			err := row.Scan(&t.ID, &t.Participant, &t.CategoryCode, &t.BibNumber, &t.JerseySize, &t.Status, &t.CollectedAt, &t.CollectedByName, &t.PickedUpBy)
+			err := row.Scan(&t.ID, &t.Participant, &t.CategoryCode, &t.BibNumber, &t.JerseySize, &t.Status, &t.CollectedAt, &t.CollectedByName, &t.PickedUpBy,
+				&t.AttendedAt, &t.AttendedBy)
 			return t, err
 		})
 		if err != nil {
@@ -300,7 +309,7 @@ func (h *Handler) EventTickets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"stats":   map[string]int{"issued": issued, "collected": collected},
+		"stats":   map[string]int{"issued": issued, "collected": collected, "attended": attended},
 		"results": list,
 	})
 }

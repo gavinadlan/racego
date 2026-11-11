@@ -12,6 +12,8 @@ export type ManifestTicket = {
   collected_at?: string;
   collected_by?: string;
   picked_up_by?: string;
+  attended_at?: string; // absen hari-H
+  attended_by?: string;
 };
 
 export type StoredManifest = {
@@ -26,11 +28,18 @@ export type StoredManifest = {
   version: string;
   downloadedAt: string;
   clockSkewMs: number; // jam perangkat − jam server saat diunduh
+  // Jendela absen hari-H dari server (perangkat offline menolak absen di luar waktu). Manifest lama: kosong = tidak dicek lokal.
+  attendanceOpensAt?: string;
+  attendanceClosesAt?: string;
 };
 
 export type QueueState = "pending" | "synced" | "conflict" | "rejected";
 
+export type QueueKind = "collect" | "attend";
+
 export type QueueEntry = {
+  /** collect (ambil race pack) atau attend (absen hari-H). Entri lama tanpa kind = collect. */
+  kind?: QueueKind;
   client_op_id: string;
   eventId: string;
   orgSlug: string;
@@ -46,6 +55,8 @@ export type QueueEntry = {
   message?: string;
   server_collected_at?: string;
   server_collected_by?: string;
+  server_attended_at?: string;
+  server_attended_by?: string;
   name: string;
   bib: string;
 };
@@ -150,13 +161,18 @@ export async function getManifest(eventId: string): Promise<StoredManifest | nul
 /** Simpan manifest + tiket. full=true menghapus tiket lama event ini dulu (unduhan penuh). */
 export async function saveManifest(m: StoredManifest, tickets: ManifestTicket[], full: boolean): Promise<void> {
   // Tiket yang sudah ditandai lokal tapi belum terkirim tetap "collected" walau server belum tahu.
-  const queued = new Set((await listQueue(m.eventId)).filter((q) => q.state === "pending").map((q) => q.ticket_id));
+  // Absen hari-H yang belum terkirim juga dipertahankan (digabung ke tiket dari server).
+  const pending = (await listQueue(m.eventId)).filter((q) => q.state === "pending");
+  const queuedCollect = new Set(pending.filter((q) => (q.kind ?? "collect") === "collect").map((q) => q.ticket_id));
+  const queuedAttend = new Map(pending.filter((q) => q.kind === "attend").map((q) => [q.ticket_id, q]));
   await tx(["manifests", "tickets"], "readwrite", async (t) => {
     const ts = t.objectStore("tickets");
     if (full) ts.delete(IDBKeyRange.bound([m.eventId, ""], [m.eventId, "\uffff"]));
     for (const tk of tickets) {
-      if (queued.has(tk.id) && tk.status === "issued") continue;
-      ts.put({ ...tk, eventId: m.eventId });
+      if (queuedCollect.has(tk.id) && tk.status === "issued") continue;
+      const a = queuedAttend.get(tk.id);
+      const merged = a && !tk.attended_at && (tk.status === "issued" || tk.status === "collected") ? { ...tk, attended_at: a.scanned_at, attended_by: "perangkat ini" } : tk;
+      ts.put({ ...merged, eventId: m.eventId });
     }
     t.objectStore("manifests").put(m);
   });

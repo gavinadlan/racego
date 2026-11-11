@@ -17,8 +17,10 @@ import {
   putTicket,
   type ManifestTicket,
   type QueueEntry,
+  type QueueKind,
   type StoredManifest,
 } from "./offline-store";
+import { formatDateTime } from "./format";
 import { ed25519Supported, verifyQR } from "./qr-verify";
 
 // ===== Status jaringan =====
@@ -52,12 +54,18 @@ type ManifestResponse = {
   expires_at: string;
   version: string;
   incremental: boolean;
+  attendance_window?: { opens_at: string; closes_at: string };
   tickets: ManifestTicket[];
 };
 
 type BatchResponse = {
   server_time: string;
-  results: { client_op_id: string; result: string; message: string; ticket?: { collected_at?: string; collected_by_staff?: string; picked_up_by?: string } }[];
+  results: {
+    client_op_id: string;
+    result: string;
+    message: string;
+    ticket?: { collected_at?: string; collected_by_staff?: string; picked_up_by?: string; attended_at?: string; attended_by_staff?: string };
+  }[];
 };
 
 export const SKEW_WARN_MS = 5 * 60_000;
@@ -74,6 +82,7 @@ export type OfflineState = {
   switchedNotice: boolean; // data milik akun lain dihapus
   issued: number; // tiket berlaku (issued + collected)
   collected: number;
+  attended: number; // sudah diabsen hari-H (tiket berlaku)
   queue: QueueEntry[]; // milik pengguna ini
   foreignQueue: number; // antrean belum terkirim milik akun lain
   syncing: boolean;
@@ -92,6 +101,7 @@ const initial: OfflineState = {
   switchedNotice: false,
   issued: 0,
   collected: 0,
+  attended: 0,
   queue: [],
   foreignQueue: 0,
   syncing: false,
@@ -127,11 +137,13 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
   const recount = useCallback(() => {
     let issued = 0;
     let collected = 0;
+    let attended = 0;
     for (const t of tickets.current.values()) {
       if (t.status === "issued" || t.status === "collected") issued++;
       if (t.status === "collected") collected++;
+      if ((t.status === "issued" || t.status === "collected") && t.attended_at) attended++;
     }
-    return { issued, collected };
+    return { issued, collected, attended };
   }, []);
 
   /** Muat ulang semua dari IndexedDB. */
@@ -209,6 +221,8 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
         version: res.version,
         downloadedAt: new Date().toISOString(),
         clockSkewMs: skew,
+        attendanceOpensAt: res.attendance_window?.opens_at,
+        attendanceClosesAt: res.attendance_window?.closes_at,
       };
       await saveManifest(m, res.tickets, !cur);
       lastRefresh.current = Date.now();
@@ -256,7 +270,7 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
         try {
           res = await apiFetch<BatchResponse>(`${base}/scan/batch`, {
             method: "POST",
-            body: { device_id: device ?? chunk[0].device_id, entries: chunk.map((e) => ({ client_op_id: e.client_op_id, token: e.token, ticket_id: e.ticket_id, scanned_at: e.scanned_at, picked_up_by: e.delegated_to })) },
+            body: { device_id: device ?? chunk[0].device_id, entries: chunk.map((e) => ({ client_op_id: e.client_op_id, token: e.token, ticket_id: e.ticket_id, scanned_at: e.scanned_at, picked_up_by: e.delegated_to, kind: e.kind ?? "collect" })) },
           });
         } catch (e) {
           // Ditolak permanen (peran dicabut, event tidak ada, data tidak sah): berhenti dicoba, tampilkan.
@@ -272,9 +286,19 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
         for (const r of res.results) {
           const q = byId.get(r.client_op_id);
           if (!q) continue;
+          const kind = q.kind ?? "collect";
           if (r.result === "ok") {
             done.push(q.client_op_id);
-          } else if (r.result === "already_collected") {
+          } else if (kind === "attend" && r.result === "already_attended") {
+            // Dua perangkat mengabsen peserta yang sama: yang diproses server lebih dulu menang; sisanya "Perlu ditinjau".
+            changed.push({ ...q, state: "conflict", result: r.result, message: r.message, server_attended_at: r.ticket?.attended_at, server_attended_by: r.ticket?.attended_by_staff });
+            const t = tickets.current.get(q.ticket_id);
+            if (t) {
+              const fixed = { ...t, attended_at: r.ticket?.attended_at ?? t.attended_at, attended_by: r.ticket?.attended_by_staff };
+              tickets.current.set(t.id, fixed);
+              await putTicket(eventId, fixed);
+            }
+          } else if (kind === "collect" && r.result === "already_collected") {
             changed.push({ ...q, state: "conflict", result: r.result, message: r.message, server_collected_at: r.ticket?.collected_at, server_collected_by: r.ticket?.collected_by_staff });
             const t = tickets.current.get(q.ticket_id);
             if (t) {
@@ -285,10 +309,15 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
           } else {
             changed.push({ ...q, state: "rejected", result: r.result, message: r.message });
             const t = tickets.current.get(q.ticket_id);
-            if (t && (r.result === "refunded" || r.result === "cancelled")) {
-              const fixed = { ...t, status: r.result as ManifestTicket["status"] };
-              tickets.current.set(t.id, fixed);
-              await putTicket(eventId, fixed);
+            if (t) {
+              let fixed = t;
+              if (r.result === "refunded" || r.result === "cancelled") fixed = { ...fixed, status: r.result as ManifestTicket["status"] };
+              // Absen ditolak server: jangan biarkan perangkat ini menampilkan peserta sebagai hadir.
+              if (kind === "attend") fixed = { ...fixed, attended_at: undefined, attended_by: undefined };
+              if (fixed !== t) {
+                tickets.current.set(t.id, fixed);
+                await putTicket(eventId, fixed);
+              }
             }
           }
         }
@@ -328,7 +357,7 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
 
   /** Verifikasi lokal; ok → masuk antrean & langsung dianggap diambil di perangkat ini. null = tidak siap offline. */
   const scanLocal = useCallback(
-    async (req: { token?: string; ticket_id?: string; picked_up_by?: string }): Promise<LocalResult | null> => {
+    async (req: { token?: string; ticket_id?: string; picked_up_by?: string }, mode: QueueKind = "collect"): Promise<LocalResult | null> => {
       const m = s.manifest;
       if (!m || !owner) return null;
       const t0 = performance.now();
@@ -360,7 +389,44 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
         collected_at: t.collected_at,
         collected_by_staff: t.collected_by,
         picked_up_by: t.picked_up_by,
+        attended_at: t.attended_at,
+        attended_by_staff: t.attended_by,
       };
+      if (mode === "attend") {
+        // Absen hari-H: tidak menyentuh status/collected. Jendela waktu dinilai dengan jam server perkiraan.
+        const serverNow = Date.now() - m.clockSkewMs;
+        const opens = m.attendanceOpensAt ? Date.parse(m.attendanceOpensAt) : null;
+        const closes = m.attendanceClosesAt ? Date.parse(m.attendanceClosesAt) : null;
+        if ((opens !== null && serverNow < opens) || (closes !== null && serverNow >= closes))
+          return done({ result: "attend_not_open", message: `Absen hari-H ${opens !== null && serverNow < opens ? "belum dibuka" : "sudah ditutup"}. Jendela absen: ${m.attendanceOpensAt ? formatDateTime(m.attendanceOpensAt) : "-"} sampai ${m.attendanceClosesAt ? formatDateTime(m.attendanceClosesAt) : "-"}.` });
+        if (t.status !== "issued" && t.status !== "collected") return done({ result: t.status, message: "Tiket berstatus " + t.status + ", tidak bisa absen", ticket });
+        if (t.attended_at) return done({ result: "already_attended", message: "Peserta sudah diabsen sebelumnya", ticket });
+        const at = new Date().toISOString();
+        const attended: ManifestTicket = { ...t, attended_at: at, attended_by: `${owner.name} (perangkat ini)` };
+        const entry: QueueEntry = {
+          kind: "attend",
+          client_op_id: crypto.randomUUID(),
+          eventId,
+          orgSlug: org,
+          ticket_id: t.id,
+          token: req.token,
+          scanned_at: at,
+          device_id: await deviceId(),
+          staff: owner.id,
+          state: "pending",
+          name: t.name,
+          bib: t.bib,
+        };
+        try {
+          await enqueue(entry, attended);
+        } catch (e) {
+          return done({ result: "error", message: errText(e, "Gagal menyimpan ke antrean perangkat.") + " Absen BELUM tercatat." });
+        }
+        tickets.current.set(t.id, attended);
+        setS((cur) => ({ ...cur, queue: [...cur.queue, entry], ...recount() }));
+        if (navigator.onLine) nextSyncAt.current = 0;
+        return done({ result: "ok", message: "Hadir tercatat", ticket: { ...ticket, attended_at: at, attended_by_staff: attended.attended_by } });
+      }
       if (t.status === "collected") return done({ result: "already_collected", message: "Race pack sudah diambil sebelumnya", ticket });
       if (t.status !== "issued") return done({ result: t.status, message: "Tiket berstatus " + t.status, ticket });
       const now = new Date().toISOString();

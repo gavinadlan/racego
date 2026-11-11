@@ -128,7 +128,7 @@ func TestParticipantsExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recs) != 4 || len(recs[0]) != 13 || recs[0][0] != "BIB" {
+	if len(recs) != 4 || len(recs[0]) != 14 || recs[0][0] != "BIB" {
 		t.Fatalf("baris/kolom CSV: %q", recs)
 	}
 	var sawInjection, sawRefund bool

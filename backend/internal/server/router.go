@@ -13,6 +13,7 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/auth"
 	"github.com/gavinadlan/racego/backend/internal/checkout"
 	"github.com/gavinadlan/racego/backend/internal/config"
+	"github.com/gavinadlan/racego/backend/internal/draw"
 	"github.com/gavinadlan/racego/backend/internal/event"
 	"github.com/gavinadlan/racego/backend/internal/finance"
 	"github.com/gavinadlan/racego/backend/internal/httpx"
@@ -42,6 +43,8 @@ type Deps struct {
 	KYCBox *secretbox.Box // kunci enkripsi dokumen & data sensitif verifikasi mitra
 	// Finance: keuangan mitra (pencairan, refund, laporan). nil = dibuat dari Cfg (DISBURSE_MODE).
 	Finance *finance.Service
+	// DrawSource: sumber acak undian. Hanya untuk tes; nil = crypto/rand (satu-satunya jalur produksi).
+	DrawSource draw.Source
 	// Turnstile: verifier anti-bot. nil = dibuat dari Cfg.Turnstile (kunci kosong = mati).
 	Turnstile *turnstile.Verifier
 }
@@ -73,6 +76,10 @@ func NewRouter(d Deps) http.Handler {
 	uploads := upload.NewHandler(upload.Disk{Dir: d.Cfg.UploadDir})
 	verif := kyc.NewHandler(d.DB, d.Redis, d.KYCBox, d.Cfg.KYCDir, d.Cfg.AutoVerifyOrgs)
 	people := participant.NewHandler(d.DB, d.Redis)
+	draws := draw.NewHandler(d.DB)
+	if d.DrawSource != nil { // hanya tes yang mengisi ini; produksi selalu crypto/rand
+		draws.WithSource(d.DrawSource)
+	}
 	fin := d.Finance
 	if fin == nil {
 		fin = finance.FromConfig(d.DB, d.KYCBox, d.Cfg)
@@ -105,6 +112,8 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/events/{eventID}", events.Get)
 		r.Get("/organizers", events.Organizers)
 		r.Get("/organizers/{slug}", events.Organizer)
+		// Hasil undian publik: 404 kecuali penyelenggara mengaktifkan draw_public; hanya BIB + nama depan + kategori.
+		r.Get("/events/{eventID}/draw-results", draws.PublicResults)
 		r.Get("/qr/public-key", tickets.PublicKey)
 		r.Post("/webhooks/midtrans", pay.WebhookHandler)
 		r.Post("/auth/otp/request", authH.RequestOTP)
@@ -145,6 +154,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleRPCStaff))
 				r.Post("/events/{eventID}/scan", tickets.Scan)
+				// Absen hari-H (terpisah dari pengambilan race pack); jendela waktu dicek di handler.
+				r.Post("/events/{eventID}/attend", tickets.Attend)
+				r.Get("/events/{eventID}/attendance/settings", tickets.AttendanceSettings)
 				r.Get("/events/{eventID}/tickets", tickets.EventTickets)
 				// Scanner offline: daftar tiket minimal untuk verifikasi lokal + sinkron antrean perangkat.
 				r.Get("/events/{eventID}/scan-manifest", tickets.Manifest)
@@ -153,6 +165,22 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/events/{eventID}/participants/summary", people.Summary)
 			})
 			// Daftar & unduhan peserta (data pribadi): hanya owner & admin.
+			r.With(editors).Post("/events/{eventID}/attend/cancel", tickets.CancelAttend)
+			r.With(editors).Put("/events/{eventID}/attendance/settings", tickets.SetAttendanceSettings)
+			// Undian doorprize: owner/admin mengelola dan mengundi; rpc_staff hanya membaca; finance ditolak.
+			readers := tenant.RequireRole(d.DB, tenant.RoleOwner, tenant.RoleAdmin, tenant.RoleRPCStaff)
+			r.With(readers).Get("/events/{eventID}/draw/settings", draws.Settings)
+			r.With(readers).Get("/events/{eventID}/draw/prizes", draws.Prizes)
+			r.With(readers).Get("/events/{eventID}/draw/winners", draws.Winners)
+			r.With(editors).Put("/events/{eventID}/draw/settings", draws.SetSettings)
+			r.With(editors).Post("/events/{eventID}/draw/prizes", draws.CreatePrize)
+			r.With(editors).Put("/events/{eventID}/draw/prizes/{prizeID}", draws.UpdatePrize)
+			r.With(editors).Delete("/events/{eventID}/draw/prizes/{prizeID}", draws.DeletePrize)
+			r.With(editors).Get("/events/{eventID}/draw/pool", draws.Pool)
+			r.With(editors).Post("/events/{eventID}/draw/prizes/{prizeID}/draw", draws.Draw)
+			r.With(editors).Post("/events/{eventID}/draw/winners/{winnerID}/claim", draws.Claim)
+			r.With(editors).Post("/events/{eventID}/draw/winners/{winnerID}/forfeit", draws.Forfeit)
+			r.With(editors).Get("/events/{eventID}/draw/results.csv", draws.CSV)
 			r.With(editors).Get("/events/{eventID}/participants", people.List)
 			r.With(editors).Get("/events/{eventID}/participants.csv", people.CSV)
 			r.Group(func(r chi.Router) {

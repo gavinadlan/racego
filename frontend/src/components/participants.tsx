@@ -2,12 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { canEdit, qs, roleIn, type Paged, type PartnerEvent, type EventParticipant, type ParticipantSummary } from "@/lib/api";
+import { ApiError, cancelAttendance, canEdit, qs, roleIn, type Paged, type PartnerEvent, type EventParticipant, type ParticipantSummary } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 import { Download, Pager } from "./finance";
 import { useSession } from "./session";
 import { btnDark, ErrorBox, Field, inputCls, Loading, LoginHint, PageTitle } from "./ui";
+import { ConfirmDialog } from "./ui-client";
 
 const TICKET_STATUS: Record<string, [string, string]> = {
   issued: ["Diterbitkan", "bg-go-soft text-go"],
@@ -48,16 +49,26 @@ export function Participants() {
   );
 }
 
+function AttendedBadge({ at }: { at: string | null }) {
+  return at ? (
+    <span className="inline-block rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap text-emerald-900" title={formatDateTime(at)}>
+      Hadir · {formatDateTime(at)}
+    </span>
+  ) : (
+    <span className="text-xs text-muted">Belum hadir</span>
+  );
+}
+
 function Summary({ s }: { s: ParticipantSummary }) {
-  const groups: [string, { key: string; label?: string; count: number }[]][] = [
-    ["Per kategori", s.by_category.map((c) => ({ ...c, label: c.key }))],
+  const groups: [string, { key: string; label?: string; count: number; extra?: string }[]][] = [
+    ["Per kategori (hadir hari-H)", s.by_category.map((c) => ({ ...c, label: c.key, extra: `hadir ${c.attended ?? 0}` }))],
     ["Ukuran jersey (tiket berlaku)", s.by_jersey],
     ["Status tiket", s.by_status.map((c) => ({ ...c, label: TICKET_STATUS[c.key]?.[0] ?? c.key }))],
   ];
   return (
     <section aria-labelledby="ringkasan" className="mb-8">
       <h2 id="ringkasan" className="mb-3 text-lg font-semibold">
-        Ringkasan · <span className="tabular-nums">{s.total}</span> tiket
+        Ringkasan · <span className="tabular-nums">{s.total}</span> tiket · hadir hari-H <span className="tabular-nums" data-testid="ringkasan-hadir">{s.attended}</span>
       </h2>
       <div className="grid gap-3 sm:grid-cols-3">
         {groups.map(([title, rows]) => (
@@ -70,7 +81,10 @@ function Summary({ s }: { s: ParticipantSummary }) {
                 {rows.map((r) => (
                   <div key={r.key} className="contents">
                     <dt className="min-w-0 truncate text-muted">{r.label ?? r.key}</dt>
-                    <dd className="text-right font-semibold tabular-nums">{r.count}</dd>
+                    <dd className="text-right font-semibold tabular-nums">
+                      {r.count}
+                      {r.extra && <span className="ml-2 text-xs font-normal text-muted">{r.extra}</span>}
+                    </dd>
                   </div>
                 ))}
               </dl>
@@ -85,11 +99,42 @@ function Summary({ s }: { s: ParticipantSummary }) {
 function ParticipantList({ base, categories }: { base: string; categories: ParticipantSummary["by_category"] }) {
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
+  const [attended, setAttended] = useState("");
+  const [cancelling, setCancelling] = useState<EventParticipant | null>(null);
+  const [reason, setReason] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const list = useApi<Paged<EventParticipant> & { total: number }>(`${base}/participants${qs({ category, status, q, page })}`);
-  const filters = qs({ category, status, q });
+  const list = useApi<Paged<EventParticipant> & { total: number }>(`${base}/participants${qs({ category, status, attended, q, page })}`);
+  const filters = qs({ category, status, attended, q });
+
+  const closeCancel = () => {
+    setCancelling(null);
+    setReason("");
+    setCancelError(null);
+  };
+  const doCancel = async () => {
+    if (!cancelling) return;
+    setCancelBusy(true);
+    setCancelError(null);
+    try {
+      await cancelAttendance(base, cancelling.ticket_id, reason.trim());
+      closeCancel();
+      list.reload();
+    } catch (e) {
+      setCancelError(e instanceof ApiError ? e.message : "Gagal membatalkan absen");
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+  const cancelBtn = (p: EventParticipant) =>
+    p.attended_at && (
+      <button type="button" className="mt-1 min-h-9 text-xs font-semibold text-red-700 underline" onClick={() => setCancelling(p)}>
+        Batalkan absen<span className="sr-only"> {p.name}</span>
+      </button>
+    );
 
   return (
     <section aria-labelledby="daftar" className="space-y-4">
@@ -102,7 +147,7 @@ function ParticipantList({ base, categories }: { base: string; categories: Parti
       <p className="text-sm text-muted">Nomor identitas hanya tampil 4 digit terakhir. Setiap unduhan tercatat di log audit.</p>
       <form
         role="search"
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,12rem)_minmax(0,12rem)_minmax(0,1fr)_auto] lg:items-end"
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,12rem)_minmax(0,12rem)_minmax(0,12rem)_minmax(0,1fr)_auto] lg:items-end"
         onSubmit={(e) => {
           e.preventDefault();
           setPage(1);
@@ -127,6 +172,13 @@ function ParticipantList({ base, categories }: { base: string; categories: Parti
                 {label}
               </option>
             ))}
+          </select>
+        </Field>
+        <Field label="Kehadiran hari-H">
+          <select className={inputCls} value={attended} onChange={(e) => (setAttended(e.target.value), setPage(1))}>
+            <option value="">Semua</option>
+            <option value="yes">Hadir</option>
+            <option value="no">Belum hadir</option>
           </select>
         </Field>
         <Field label="Cari nama, email, atau BIB">
@@ -159,6 +211,7 @@ function ParticipantList({ base, categories }: { base: string; categories: Parti
                   <th scope="col" className="w-16 px-3 py-2 font-semibold">Jersey</th>
                   <th scope="col" className="w-44 px-3 py-2 font-semibold">Kontak darurat</th>
                   <th scope="col" className="w-32 px-3 py-2 font-semibold">Status</th>
+                  <th scope="col" className="w-40 px-3 py-2 font-semibold">Hadir hari-H</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -181,6 +234,10 @@ function ParticipantList({ base, categories }: { base: string; categories: Parti
                       <TicketBadge status={p.status} />
                       {p.collected_at && <span className="mt-0.5 block text-xs text-muted">{formatDateTime(p.collected_at)}</span>}
                     </td>
+                    <td className="px-3 py-2.5">
+                      <AttendedBadge at={p.attended_at} />
+                      <span className="block">{cancelBtn(p)}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -192,7 +249,9 @@ function ParticipantList({ base, categories }: { base: string; categories: Parti
                 <p className="flex flex-wrap items-center gap-2">
                   <b className="font-mono">{p.bib}</b>
                   <TicketBadge status={p.status} />
+                  <AttendedBadge at={p.attended_at} />
                 </p>
+                {cancelBtn(p)}
                 <p className="mt-1 font-semibold break-words">{p.name}</p>
                 <p className="break-all text-muted">{p.email}</p>
                 <p className="text-muted">
@@ -209,6 +268,23 @@ function ParticipantList({ base, categories }: { base: string; categories: Parti
           <Pager page={list.data.page} pageSize={list.data.page_size} total={list.data.total} onPage={setPage} />
         </>
       )}
+      <ConfirmDialog
+        open={cancelling !== null}
+        title="Batalkan absen hari-H?"
+        confirmLabel="Batalkan absen"
+        danger
+        busy={cancelBusy}
+        disabled={reason.trim().length < 5}
+        onClose={closeCancel}
+        onConfirm={doCancel}
+      >
+        <p>
+          <b>{cancelling?.name}</b> ({cancelling?.bib}) tidak lagi tercatat hadir dan keluar dari kolam undian. Pembatalan tercatat di log audit. Pemenang undian aktif tidak bisa dibatalkan absennya.
+        </p>
+        <Field label="Alasan" required hint="5–300 karakter. Jangan menulis data pribadi." error={cancelError ?? undefined}>
+          <textarea className={inputCls} rows={3} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </ConfirmDialog>
     </section>
   );
 }

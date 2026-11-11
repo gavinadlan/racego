@@ -69,6 +69,8 @@ type ManifestTicket struct {
 	CollectedAt *time.Time `json:"collected_at,omitempty"`
 	CollectedBy *string    `json:"collected_by,omitempty"` // nama staf yang menandai
 	PickedUpBy  *string    `json:"picked_up_by,omitempty"` // "diwakilkan oleh"
+	AttendedAt  *time.Time `json:"attended_at,omitempty"`  // absen hari-H
+	AttendedBy  *string    `json:"attended_by,omitempty"`  // nama staf yang mengabsen
 }
 
 // Manifest: GET /v1/org/{org}/events/{eventID}/scan-manifest[?since=<version>] — owner, admin, rpc_staff.
@@ -112,9 +114,11 @@ func (h *Handler) Manifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.db.Query(ctx, `
-		SELECT t.id, t.bib_number, p.full_name, c.code, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name
+		SELECT t.id, t.bib_number, p.full_name, c.code, p.jersey_size, t.status, t.collected_at, u.name, t.collected_by_name,
+		       t.attended_at, ua.name
 		FROM tickets t JOIN participants p ON p.id = t.participant_id JOIN ticket_categories c ON c.id = t.category_id
 		LEFT JOIN users u ON u.id = t.collected_by
+		LEFT JOIN users ua ON ua.id = t.attended_by
 		WHERE t.event_id = $1 AND t.org_id = $2 AND t.updated_at > $3
 		ORDER BY t.id`, eventID, m.OrgID, since)
 	if err != nil {
@@ -134,6 +138,11 @@ func (h *Handler) Manifest(w http.ResponseWriter, r *http.Request) {
 		defer gz.Close()
 		out = gz
 	}
+	opens, closes, werr := AttendanceWindow(ctx, h.db, eventID)
+	if werr != nil {
+		httpx.Internal(w, r, werr)
+		return
+	}
 	head, _ := json.Marshal(map[string]any{
 		"event":        map[string]any{"id": eventID, "name": ev.Name, "race_date": ev.RaceDate, "org_slug": m.OrgSlug},
 		"algorithm":    "Ed25519",
@@ -144,6 +153,8 @@ func (h *Handler) Manifest(w http.ResponseWriter, r *http.Request) {
 		"version":     strconv.FormatInt(now.UnixMicro(), 10),
 		"incremental": !since.IsZero(),
 		"count":       ev.Total,
+		// Jendela absen hari-H: perangkat offline memakainya untuk menolak absen di luar waktu.
+		"attendance_window": map[string]any{"opens_at": opens, "closes_at": closes},
 	})
 	// {…kepala…, "tickets":[ … ]}: kepala ditulis tanpa '}' penutup, lalu tiket satu per satu.
 	_, err = io.WriteString(out, string(head[:len(head)-1])+`,"tickets":[`)
@@ -151,7 +162,7 @@ func (h *Handler) Manifest(w http.ResponseWriter, r *http.Request) {
 	n := 0
 	for err == nil && rows.Next() {
 		var t ManifestTicket
-		if err = rows.Scan(&t.ID, &t.Bib, &t.Name, &t.Category, &t.Jersey, &t.Status, &t.CollectedAt, &t.CollectedBy, &t.PickedUpBy); err != nil {
+		if err = rows.Scan(&t.ID, &t.Bib, &t.Name, &t.Category, &t.Jersey, &t.Status, &t.CollectedAt, &t.CollectedBy, &t.PickedUpBy, &t.AttendedAt, &t.AttendedBy); err != nil {
 			break
 		}
 		if n > 0 {
@@ -190,8 +201,9 @@ type BatchEntry struct {
 	ClientOpID string    `json:"client_op_id"`
 	Token      string    `json:"token,omitempty"`
 	TicketID   string    `json:"ticket_id,omitempty"`
-	ScannedAt  time.Time `json:"scanned_at"` // jam perangkat: disimpan, tidak dipakai memutuskan
+	ScannedAt  time.Time `json:"scanned_at"` // jam perangkat: disimpan; hanya dipakai menilai jendela absen
 	PickedUpBy string    `json:"picked_up_by,omitempty"`
+	Kind       string    `json:"kind,omitempty"` // collect (bawaan) | attend
 }
 
 type BatchResult struct {
@@ -250,20 +262,48 @@ func (h *Handler) syncOne(ctx context.Context, orgID, eventID, staffID, deviceID
 	if res, found, err := h.replay(ctx, opID, orgID, eventID); err != nil || found {
 		return res, err
 	}
+	kind := e.Kind
+	if kind == "" {
+		kind = "collect"
+	}
+	if kind != "collect" && kind != "attend" {
+		return BatchResult{ClientOpID: opID.String(), ScanResponse: ScanResponse{Result: "invalid", Message: "kind harus collect atau attend"}}, nil
+	}
 	var scannedAt *time.Time
 	if !e.ScannedAt.IsZero() {
 		scannedAt = &e.ScannedAt
 	}
+	// Absen di luar jendela ditolak. Jam yang dinilai = jam perangkat saat memindai (sinkron bisa terjadi
+	// jauh sesudah acara); jam perangkat hanya menentukan jendela, tidak menentukan siapa yang menang.
+	if kind == "attend" {
+		opens, closes, werr := AttendanceWindow(ctx, h.db, eventID)
+		if werr != nil {
+			return BatchResult{}, werr
+		}
+		at := time.Now()
+		if scannedAt != nil {
+			at = *scannedAt
+		}
+		if !inWindow(at, opens, closes) {
+			return BatchResult{ClientOpID: opID.String(), ScanResponse: ScanResponse{Result: "attend_not_open", Message: windowMessage(opens, closes)}}, nil
+		}
+	}
 	var res BatchResult
 	err = pgx.BeginFunc(ctx, h.db, func(tx pgx.Tx) error {
-		resp, ticketID := scan(ctx, tx, h.signer, orgID, eventID, staffID, ScanRequest{Token: e.Token, TicketID: e.TicketID, PickedUpBy: e.PickedUpBy})
+		var resp ScanResponse
+		var ticketID *uuid.UUID
+		if kind == "attend" {
+			resp, ticketID = attend(ctx, tx, h.signer, orgID, eventID, staffID, ScanRequest{Token: e.Token, TicketID: e.TicketID})
+		} else {
+			resp, ticketID = scan(ctx, tx, h.signer, orgID, eventID, staffID, ScanRequest{Token: e.Token, TicketID: e.TicketID, PickedUpBy: e.PickedUpBy})
+		}
 		if resp.Result == "error" {
 			return errors.New(resp.Message)
 		}
 		res = BatchResult{ClientOpID: opID.String(), ScanResponse: resp}
 		_, err := tx.Exec(ctx, `
-			INSERT INTO scan_logs (org_id, event_id, ticket_id, staff_id, result, client_op_id, device_id, scanned_at_device, source)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'offline_sync')`, orgID, eventID, ticketID, staffID, resp.Result, opID, deviceID, scannedAt)
+			INSERT INTO scan_logs (org_id, event_id, ticket_id, staff_id, result, client_op_id, device_id, scanned_at_device, source, kind)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'offline_sync', $9)`, orgID, eventID, ticketID, staffID, resp.Result, opID, deviceID, scannedAt, kind)
 		return err
 	})
 	var pgErr *pgconn.PgError
@@ -279,16 +319,20 @@ func (h *Handler) syncOne(ctx context.Context, orgID, eventID, staffID, deviceID
 
 // replay: hasil entri yang sudah pernah diproses (pengiriman ulang tidak berefek ganda).
 func (h *Handler) replay(ctx context.Context, opID, orgID, eventID uuid.UUID) (BatchResult, bool, error) {
-	var result string
+	var result, kind string
 	var ticketID *uuid.UUID
-	err := h.db.QueryRow(ctx, `SELECT result, ticket_id FROM scan_logs WHERE client_op_id = $1 AND org_id = $2 AND event_id = $3`, opID, orgID, eventID).Scan(&result, &ticketID)
+	err := h.db.QueryRow(ctx, `SELECT result, ticket_id, kind FROM scan_logs WHERE client_op_id = $1 AND org_id = $2 AND event_id = $3`, opID, orgID, eventID).Scan(&result, &ticketID, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BatchResult{}, false, nil
 	}
 	if err != nil {
 		return BatchResult{}, false, err
 	}
-	res := BatchResult{ClientOpID: opID.String(), ScanResponse: ScanResponse{Result: result, Message: resultMessage[result]}}
+	msg := resultMessage[result]
+	if kind == "attend" {
+		msg = attendMessage[result]
+	}
+	res := BatchResult{ClientOpID: opID.String(), ScanResponse: ScanResponse{Result: result, Message: msg}}
 	if ticketID != nil && result != "wrong_event" {
 		if t, err := ticketDetail(ctx, h.db, *ticketID, eventID, orgID); err == nil {
 			res.Ticket = &t
@@ -305,4 +349,14 @@ var resultMessage = map[string]string{
 	"not_found":         "Tiket tidak terdaftar di event ini",
 	"refunded":          "Tiket berstatus refunded",
 	"cancelled":         "Tiket berstatus cancelled",
+}
+
+var attendMessage = map[string]string{
+	"ok":               "Hadir tercatat",
+	"already_attended": "Peserta sudah diabsen sebelumnya",
+	"invalid":          "QR tidak dikenali atau palsu",
+	"wrong_event":      "Tiket ini untuk event lain",
+	"not_found":        "Tiket tidak terdaftar di event ini",
+	"refunded":         "Tiket berstatus refunded, tidak bisa absen",
+	"cancelled":        "Tiket berstatus cancelled, tidak bisa absen",
 }
