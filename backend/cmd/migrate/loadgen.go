@@ -180,6 +180,7 @@ func loadgenCheck(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, env 
 	drain := fs.Duration("drain", 2*time.Minute, "batas menunggu outbox kosong")
 	settle := fs.Duration("settle", 0, "batas menunggu hold & order pending habis (0 = tidak menunggu)")
 	converge := fs.Duration("converge", 60*time.Second, "batas menunggu stok Redis konvergen (rekonsiliasi worker)")
+	allowRefund := fs.Bool("allow-needs-refund", false, "chaos Redis: order needs_refund (ditolak pagar kuota database) dilaporkan, bukan kegagalan")
 	jsonOut := fs.String("json", "", "tulis hasil sebagai JSON ke berkas ini")
 	_ = fs.Parse(args)
 	raw, err := os.ReadFile(*seedPath)
@@ -260,7 +261,7 @@ func loadgenCheck(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, env 
 	paidQty := count(`SELECT coalesce(sum(qty), 0) FROM orders WHERE event_id = $1 AND status = 'paid'`, ev)
 	add("a2 order lunas = tiket terbit", paidQty == totalTickets, "qty lunas %d, tiket %d", paidQty, totalTickets)
 	needsRefund := count(`SELECT count(*) FROM orders WHERE event_id = $1 AND status = 'needs_refund'`, ev)
-	add("a3 tidak ada order needs_refund", needsRefund == 0, "%d order (bayar telat saat kuota habis)", needsRefund)
+	add("a3 tidak ada order needs_refund", needsRefund == 0 || *allowRefund, "%d order (bayar telat / pagar kuota database menolak)", needsRefund)
 
 	// (b) BIB ganda / tiket ganda per peserta.
 	dupBib := count(`SELECT count(*) FROM (SELECT 1 FROM tickets WHERE event_id = $1 GROUP BY category_id, bib_number HAVING count(*) > 1) x`, ev)
@@ -320,7 +321,9 @@ func loadgenCheck(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, env 
 				held += n
 			}
 			sold := int(count(`SELECT coalesce(sum(qty), 0) FROM orders WHERE category_id = $1 AND status = 'paid'`, c.ID))
-			if stock+held+sold != c.Quota {
+			// Dengan --allow-needs-refund (chaos Redis): stok+ditahan+terjual < kuota (menjual lebih sedikit, arah aman:
+			// slot order needs_refund tidak dikembalikan) dilaporkan tetapi tidak gagal; > kuota tetap gagal.
+			if total := stock + held + sold; total > c.Quota || (total != c.Quota && !*allowRefund) {
 				mismatch++
 			}
 			recon = append(recon, fmt.Sprintf("%s stok %d + ditahan %d + terjual %d = %d (kuota %d)", c.Code, stock, held, sold, stock+held+sold, c.Quota))

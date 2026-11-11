@@ -119,6 +119,10 @@ Masuk sebagai owner/admin/staf race pack → event → **Scan race pack** → *S
 
 Jendela absen bawaan baru dibuka pada tanggal lomba, jadi di development atur salah satu: (a) halaman Undian → kartu **Jendela absen hari-H** (buka kemarin, tutup besok), atau (b) `UPDATE events SET race_date = current_date WHERE id = '…'`. Lalu: beli tiket (mock), buka **Scan race pack** → pilih mode **Absen hari-H** → scan/cari manual; halaman **Peserta** menampilkan kolom Hadir. Di halaman **Undian** (tombol Undian di dashboard) tambah hadiah, cek ringkasan kolam, buka **Layar panggung**, lalu Undi. Emulasi `prefers-reduced-motion` di DevTools (Rendering) untuk menguji tanpa animasi. Tes backend: `internal/server/attend_test.go`, `draw_test.go`, `internal/draw/draw_test.go` (jalankan dengan `RACEGO_TEST_DATABASE_URL`).
 
+## Memeriksa konsistensi stok
+
+`cd backend && go run ./cmd/migrate stock-check [--event <event-id>]` membandingkan per kategori event terbit: kuota, tiket terbit (semua status), order lunas/pending, dan stok Redis (stok, ditahan). Keluaran hanya angka dan ID kategori. Exit 1 bila tiket > kuota (`OVERSELL`) atau stok+ditahan+lunas > kuota (`REDIS_LONGGAR`; reconciler menjepitnya dalam ±30 detik). Redis lebih ketat dari database dilaporkan sebagai OK (arah aman). Tes: `cmd/migrate` (`TestStockCheckDetectsLooseRedis`) dan `internal/worker/guard_test.go` (pagar, Redis rusak paralel 20×, idempotensi, kuota berubah, pemulihan batas per pembeli).
+
 ## Uji beban & metrik
 
 Hasil pengukuran dan cara membacanya: [11-performa.md](11-performa.md). Ringkas cara pakainya:

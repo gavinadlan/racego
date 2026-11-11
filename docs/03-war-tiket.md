@@ -33,6 +33,22 @@ Event tanpa antrian langsung masuk di "Reservasi atomik": tidak ada pass, tidak 
 | Cluster-ready | Semua key satu kategori memakai hash tag `{cat:<id>}` agar berada di slot Redis Cluster yang sama | `checkout/inventory.go` |
 | Antrian virtual (opsional per event) | Lobi + urutan acak, pemanggilan bertahap oleh worker, pass HMAC wajib untuk reservasi | `queue/`, `queue/lua/*.lua` |
 
+## Pelindung berlapis (Tugas 11)
+
+Prinsip: **database adalah sumber kebenaran jumlah tiket yang sah; Redis hanya jalur cepat.**
+
+| Lapis | Peran | Yang dijaga |
+| --- | --- | --- |
+| 1. Redis (`reserve.lua`) | jalur cepat di depan pembeli | pembeli yang ditolak "habis" cepat, tanpa menyentuh database |
+| 2. Pagar database (`ticket.CheckQuota` / `IssueForOrder`) | dalam transaksi penerbitan tiket: kunci baris kategori, hitung **semua** tiket kategori (status apa pun; stok terjual tidak kembali ke penjualan), tolak bila terbit + peserta order > `quota` **saat ini** | tiket tidak pernah melebihi kuota, apa pun keadaan Redis (kosong, longgar, kehilangan tulisan) |
+| 3. Rekonsiliasi (`StockReconciler`, worker tiap 15 dtk) | menjepit stok Redis ke `kuota − order aktif` (hanya menurunkan); tiap ±2 menit dan saat stok dimuat ulang memulihkan hitungan per pembeli (`RestoreUserLimits`) | Redis kembali selaras dengan database dalam menit, tanpa menaikkan stok |
+
+Urutan di `onOrderPaid`: **pagar database dulu, baru `Confirm` Redis.** Bila pagar menolak (order tidak muat sama sekali; order multi-peserta tidak pernah terbit sebagian), worker mengembalikan hold di Redis (menurunkan hitungan pembeli), menandai order `needs_refund` tanpa tiket dan tanpa jurnal `order.paid`, menaikkan metrik `racego_stock_guard_rejections_total`, dan mencatat peringatan dengan ID order (tanpa data pribadi). Pagar dijalankan sebelum alokasi BIB, jadi penolakan tidak melompati nomor. Pemrosesan ulang pesan `order.paid` aman: order yang sudah `needs_refund` dilewati. Stok Redis yang masih longgar dijepit reconciler karena order `needs_refund` tidak dihitung sebagai slot terpakai. Tidak ada kompensasi lain di Redis yang diperlukan.
+
+**Yang dilihat pembeli bila pagar menolak:** pembayaran sudah berhasil, tetapi tiketnya tidak terbit; status order menjadi `needs_refund` dan jalur refund yang sama dengan "bayar telat saat kuota habis" berlaku (Tugas 06: mitra atau super admin mengajukan, uang dikembalikan). Pada keadaan normal (Redis benar) pagar tidak pernah menolak.
+
+Operator memeriksa keselarasan dengan `go run ./cmd/migrate stock-check` (lihat [08-development](08-development.md)). Hasil uji beban dan chaos: [11-performa](11-performa.md#pengerasan-stok-tugas-11).
+
 ## Belum dibuat (urut prioritas)
 
 1. **Turnstile** di tombol Daftar + rate limit per NIK; deteksi akun ganda.

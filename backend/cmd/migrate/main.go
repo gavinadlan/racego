@@ -7,6 +7,7 @@
 //	go run ./cmd/migrate verify <org-slug>                # verifikasi mitra (boleh menerbitkan event)
 //	go run ./cmd/migrate superadmin <email>               # jadikan akun super admin platform (/admin)
 //	go run ./cmd/migrate release <org-slug>               # DEV: rilis semua saldo tertahan org tanpa menunggu masa tahan
+//	go run ./cmd/migrate stock-check [--event id]         # bandingkan kuota vs tiket terbit vs stok Redis per kategori (exit 1 bila oversell/Redis longgar)
 //	go run ./cmd/migrate loadgen-seed --users N --out f   # UJI BEBAN: pengguna sintetis + event uji (hanya development + DB *_loadtest)
 //	go run ./cmd/migrate loadgen-check --seed f           # UJI BEBAN: pemeriksaan integritas setelah skenario war
 package main
@@ -86,6 +87,13 @@ func main() {
 		}
 		defer rdb.Close()
 		err = loadgenCheck(ctx, db, rdb, cfg.Env, os.Args[2:])
+	case "stock-check":
+		rdb, rerr := platform.NewRedis(ctx, cfg.RedisAddr, cfg.RedisPassword)
+		if rerr != nil {
+			log.Fatalf("koneksi redis gagal: %v", rerr)
+		}
+		defer rdb.Close()
+		err = stockCheck(ctx, db, rdb, os.Args[2:])
 	default:
 		err = fmt.Errorf("perintah tidak dikenal: %s", os.Args[1])
 	}

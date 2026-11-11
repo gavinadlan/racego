@@ -20,9 +20,12 @@ import (
 	"github.com/gavinadlan/racego/backend/internal/tenant"
 )
 
-// IssueForOrder menerbitkan satu tiket per peserta order. Idempotent: peserta yang
-// sudah punya tiket dilewati (UNIQUE participant_id), jadi aman bila worker mengulang.
-func IssueForOrder(ctx context.Context, tx pgx.Tx, signer *Signer, orderID uuid.UUID) (int, error) {
+// ErrQuotaExceeded: penerbitan akan melebihi kuota kategori di database. Order tidak boleh menerbitkan sebagian.
+var ErrQuotaExceeded = errors.New("kuota kategori di database terlampaui")
+
+type pendingTicket struct{ participantID, categoryID, eventID, orgID uuid.UUID }
+
+func pendingParticipants(ctx context.Context, tx pgx.Tx, orderID uuid.UUID) ([]pendingTicket, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, p.category_id, p.event_id, p.org_id
 		FROM participants p
@@ -30,23 +33,61 @@ func IssueForOrder(ctx context.Context, tx pgx.Tx, signer *Signer, orderID uuid.
 		  AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.participant_id = p.id)
 		ORDER BY p.id`, orderID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	type pending struct{ participantID, categoryID, eventID, orgID uuid.UUID }
-	var list []pending
+	defer rows.Close()
+	var list []pendingTicket
 	for rows.Next() {
-		var p pending
+		var p pendingTicket
 		if err := rows.Scan(&p.participantID, &p.categoryID, &p.eventID, &p.orgID); err != nil {
-			rows.Close()
-			return 0, err
+			return nil, err
 		}
 		list = append(list, p)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	return list, rows.Err()
+}
+
+// guardQuota: pagar kedua di database (Redis hanya jalur cepat). Mengunci baris kategori lalu menolak bila
+// tiket yang sudah terbit (status apa pun; stok terjual tidak kembali ke penjualan) + n > kuota SAAT INI.
+// Dijalankan sebelum BIB dialokasikan, jadi penolakan tidak melompati nomor.
+func guardQuota(ctx context.Context, tx pgx.Tx, categoryID uuid.UUID, n int) error {
+	var quota, issued int
+	if err := tx.QueryRow(ctx, `SELECT quota FROM ticket_categories WHERE id = $1 FOR UPDATE`, categoryID).Scan(&quota); err != nil {
+		return fmt.Errorf("kunci kategori: %w", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM tickets WHERE category_id = $1`, categoryID).Scan(&issued); err != nil {
+		return err
+	}
+	if issued+n > quota {
+		return ErrQuotaExceeded
+	}
+	return nil
+}
+
+// CheckQuota: apakah order ini masih muat di kuota database? Dipanggil worker SEBELUM mengonfirmasi stok di
+// Redis, supaya penolakan tidak perlu membatalkan apa pun di Redis. nil bila muat (atau tidak ada yang perlu terbit).
+func CheckQuota(ctx context.Context, tx pgx.Tx, orderID uuid.UUID) error {
+	list, err := pendingParticipants(ctx, tx, orderID)
+	if err != nil || len(list) == 0 {
+		return err
+	}
+	return guardQuota(ctx, tx, list[0].categoryID, len(list))
+}
+
+// IssueForOrder menerbitkan satu tiket per peserta order. Idempotent: peserta yang
+// sudah punya tiket dilewati (UNIQUE participant_id), jadi aman bila worker mengulang.
+// Semua pemanggil dilindungi pagar kuota: ErrQuotaExceeded berarti tidak ada tiket yang terbit.
+func IssueForOrder(ctx context.Context, tx pgx.Tx, signer *Signer, orderID uuid.UUID) (int, error) {
+	list, err := pendingParticipants(ctx, tx, orderID)
+	if err != nil {
 		return 0, err
 	}
-
+	if len(list) == 0 {
+		return 0, nil
+	}
+	if err := guardQuota(ctx, tx, list[0].categoryID, len(list)); err != nil {
+		return 0, err
+	}
 	for _, p := range list {
 		// Nomor BIB berurutan per kategori; baris kategori terkunci selama transaksi.
 		var prefix string

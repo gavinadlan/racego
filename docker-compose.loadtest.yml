@@ -27,7 +27,8 @@ services:
   redis:
     image: redis:7-alpine
     # Sama dengan produksi: AOF menyala, kunci stok tidak boleh dibuang.
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    # REDIS_APPENDFSYNC (everysec bawaan | always | no): hanya untuk mengukur dampaknya (docs/11-performa.md).
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "${REDIS_APPENDFSYNC:-everysec}", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     ports:
       - "127.0.0.1:6381:6379"
     volumes:

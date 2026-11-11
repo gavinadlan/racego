@@ -108,6 +108,7 @@ Rekening = rekening dari pengajuan verifikasi yang **disetujui**. Saat super adm
 
 ### Refund
 
+- `needs_refund` berasal dari dua jalur yang menghasilkan keadaan identik (tanpa tiket, tanpa jurnal `order.paid`): bayar telat saat stok Redis habis, dan **pagar kuota database** menolak penerbitan ([03](03-war-tiket.md#pelindung-berlapis-tugas-11)). Keduanya direfund dengan cara yang sama di bawah ini.
 - Satuan = **seluruh order** `paid` atau `needs_refund`. Owner/finance mengajukan (`POST /v1/org/{org}/orders/{id}/refund`, alasan 10–500 karakter); super admin menyetujui/menolak, atau membuat refund langsung yang otomatis disetujui. Satu refund aktif/selesai per order (`refunds_order_active_uniq`).
 - **Saat disetujui, satu transaksi:** order → `refunded`, semua tiket → `refunded` (scanner menolaknya), jurnal `order.refund`. Bagian mitra ditarik dari saldo tersedia bila order sudah dirilis, selain itu dari tertahan. **Saldo boleh negatif** = utang mitra; selama negatif pencairan ditolak (`insufficient_balance`) sampai tertutup penjualan baru. Order `needs_refund` belum pernah punya `order.paid` (worker berhenti saat kuota habis), jadi penerimaan uangnya dibukukan dulu lalu langsung dibalik.
 - **Biaya PG tidak kembali** saat refund: selisih `total − kas yang diterima` dibukukan ke `beban_refund_pg` (ditanggung platform), pembeli menerima `total` penuh.

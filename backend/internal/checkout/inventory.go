@@ -25,12 +25,15 @@ var (
 	adjustSrc string
 	//go:embed lua/clamp.lua
 	clampSrc string
+	//go:embed lua/raise_user.lua
+	raiseUserSrc string
 
-	reserveScript = redis.NewScript(reserveSrc)
-	releaseScript = redis.NewScript(releaseSrc)
-	confirmScript = redis.NewScript(confirmSrc)
-	adjustScript  = redis.NewScript(adjustSrc)
-	clampScript   = redis.NewScript(clampSrc)
+	reserveScript   = redis.NewScript(reserveSrc)
+	releaseScript   = redis.NewScript(releaseSrc)
+	confirmScript   = redis.NewScript(confirmSrc)
+	adjustScript    = redis.NewScript(adjustSrc)
+	clampScript     = redis.NewScript(clampSrc)
+	raiseUserScript = redis.NewScript(raiseUserSrc)
 )
 
 var (
@@ -294,4 +297,10 @@ func (inv *Inventory) Totals(ctx context.Context, categoryIDs []string) (stock, 
 // ActiveCategories mengembalikan semua kategori yang stoknya dikelola di Redis.
 func (inv *Inventory) ActiveCategories(ctx context.Context) ([]string, error) {
 	return inv.rdb.SMembers(ctx, activeCategoriesKey).Result()
+}
+
+// RaiseUserLimit menaikkan hitungan slot milik user ke target bila Redis lebih rendah (atomik; tidak pernah menurunkan).
+func (inv *Inventory) RaiseUserLimit(ctx context.Context, categoryID, userID string, target int, ttl time.Duration) (bool, error) {
+	n, err := raiseUserScript.Run(ctx, inv.rdb, []string{keysFor(categoryID).user(userID)}, target, int64(ttl.Seconds())).Int()
+	return n == 1, err
 }

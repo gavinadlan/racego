@@ -132,7 +132,51 @@ Redis dengan AOF `everysec` kehilangan ≤1 detik tulisan terakhir saat di-kill.
 
 **Bukti sebelum/sesudah** (eksekusi ulang SIGKILL dengan perbaikan): worker menjepit kategori yang rusak (log: 27→22, 26→18, 18→15, 24→16, 8→5, kategori dari eksekusi lama ikut terbersihkan), dan pada event baru stok 31 → 26 sehingga (e) = tepat kuota. Catatan: selisih baru terlihat setelah hold yatim kedaluwarsa dan dijepit ≤30 dtk kemudian, jadi `loadgen-check` kini menunggu konvergensi (`--converge`, 60 dtk) sebelum menyatakan (e) gagal.
 
-**Celah yang tersisa** (dicatat, tidak diperbaiki): (1) di antara crash dan putaran penjepit kedua (≤30 dtk) oversell tetap mungkin bila stok terakhir habis; menutupnya penuh butuh `appendfsync always` di Redis (biaya throughput) atau penghitungan di database. (2) Kunci jumlah milik pembeli (`{cat}:user:*`) yang hilang akan melonggarkan batas per pembeli; belum ada rekonsiliasinya. (3) Antrean virtual yang hilang karena Redis di-kill membuat pengantre tidak ada di antrean; mereka harus masuk lagi (terlihat sebagai `not_in_queue`, klien k6 masuk ulang).
+**Celah yang tersisa setelah Tugas 9** (ditutup di Tugas 11, lihat bagian di bawah): (1) oversell di jendela sebelum rekonsiliasi: **tertutup oleh pagar kuota di database**; (2) kunci jumlah milik pembeli yang hilang: **tertutup oleh `RestoreUserLimits`**; (3) antrean virtual yang hilang karena Redis di-kill membuat pengantre tidak ada di antrean; mereka harus masuk lagi (terlihat sebagai `not_in_queue`, klien k6 masuk ulang). Butir (3) tetap terbuka.
+
+## Pengerasan stok (Tugas 11)
+
+Prinsip: database sumber kebenaran jumlah tiket sah, Redis jalur cepat ([03](03-war-tiket.md#pelindung-berlapis-tugas-11)). Semua angka di bawah: `war` 2.000 pengguna, kuota 500 (250/150/100), infra uji yang sama dengan Tugas 9 (Redis AOF `everysec` kecuali disebut), satu mesin untuk k6, API, worker, Postgres, Redis. Satu eksekusi per baris kecuali disebut; derau antar-eksekusi besar (lihat `after2`).
+
+**Bukti pagar di bawah beban nyata** (`loadgen-check`; chaos terjadi ±110 dtk setelah mulai):
+
+| Eksekusi | Tiket terbit / kuota (5K, 10K, 21K) | Order `needs_refund` | BIB ganda | Ledger | Hasil |
+| --- | --- | --- | --- | --- | --- |
+| kode lama, tanpa chaos | lulus | 0 | 0 | seimbang | lulus |
+| **kode lama, Redis `SIGKILL`** | **251**/250, 150/150, 99/100 | 0 | 0 | seimbang | **gagal: oversell** (a1, e) |
+| kode lama, `FLUSHALL` | 241/250, 139/150, 97/100 | 7 | 0 | seimbang | a3 dan e gagal (lihat catatan 2) |
+| kode baru, tanpa chaos | 246, 150, 98 | 0 | 0 | seimbang | lulus |
+| **kode baru, Redis `SIGKILL`** | 250, 149, 100 (**≤ kuota**) | **23**, semuanya ditolak pagar (23 baris log + metrik) | 0 | seimbang | lulus |
+| kode baru, `FLUSHALL` | 235, 147, 95 | 8 | 0 | seimbang | lulus |
+| kode baru, `appendfsync always` + `SIGKILL` | 248, 148, 98 | 0 | 0 | seimbang | lulus |
+
+Kode lama pada `SIGKILL` mereproduksi oversell (251 tiket untuk kuota 250); kode baru pada pengulangan yang sama menahan tiket di kuota dan mengubah 23 order lunas yang kelebihan menjadi `needs_refund` (tanpa tiket, tanpa jurnal `order.paid`; refund lewat jalur Tugas 6). Respons 5xx pada eksekusi `SIGKILL` (±3.100 hitungan `unexpected` k6, sama dengan kode lama) seluruhnya `connection refused` ke Redis selama ±8 dtk Redis mati (join/status antrean); pembeli yang mengulang pulih. Tidak ada 5xx di eksekusi `FLUSHALL`; `unexpected` 8 di sana = 8 pembeli yang order-nya `needs_refund`.
+
+Catatan 1. Eksekusi pertama "after/flush/kill" ternyata memakai worker lama karena `run.sh` tidak memulai ulang proses yang masih hidup; hasilnya disimpan sebagai pembanding "kode lama" di atas, lalu seluruhnya diulang dengan kode baru setelah `run.sh stop`. Catatan 2. Pada `FLUSHALL`, order yang pembayarannya masuk setelah hold-nya hilang diproses `confirm.lua` sebagai "bayar telat": stok yang baru dimuat ulang sudah mengurangi order itu, jadi `Confirm` mengambilnya lagi dan, bila stok habis, menjawab `needs_refund` walau tiket terbit (477) masih di bawah kuota (500). Ini perilaku lama (7 order sebelum, 8 sesudah), bukan pagar; pembeli direfund dan slotnya tidak dijual ulang (menjual lebih sedikit, arah aman). `loadgen-check --allow-needs-refund` (otomatis saat `CHAOS`) kini hanya menggagalkan stok+ditahan+terjual **lebih besar** dari kuota. Memperbaiki perilaku itu (menerbitkan bila database masih punya ruang) mengubah semantik bayar telat dan di luar cakupan.
+
+**Regresi performa** (tanpa chaos; ms sisi klien k6; p50 / p95 reservasi, p95 order, p95 tiket terbit setelah bayar):
+
+| Eksekusi | Reservasi | Order p95 | Tiket terbit p95 | req/dtk |
+| --- | --- | --- | --- | --- |
+| kode lama #1 | 1,63 / 4,12 | 20,3 | 1.009 ms | 152 |
+| kode lama #2 | 1,51 / 3,31 | 15,6 | 1.007 ms | 152 |
+| kode baru #1 | 1,51 / 3,07 | 16,7 | 1.007 ms | 150 |
+| kode baru #2 | 1,51 / 8,5 | 128,7 | 1.145 ms | 152 |
+
+Pagar menambah dua kueri kecil (kunci baris kategori, hitung tiket lewat indeks baru `tickets_category_idx`) di transaksi penerbitan, tidak di jalur reservasi. Kode baru #1 tidak berbeda dari kode lama; kode baru #2 punya satu lonjakan (order p95 129 ms, reservasi p95 8,5 ms) yang mirip derau ±25% yang sudah dicatat di Tugas 9 dan tidak muncul pada dua eksekusi `always` yang memakai kode sama. Kesimpulan: tidak ada kemunduran terukur; waktu tiket terbit tetap ±1 dtk (interval outbox 500 ms).
+
+**Evaluasi `appendfsync`** (kode baru, `war` 2.000, `docker-compose.loadtest.yml` dengan `REDIS_APPENDFSYNC`):
+
+| Mode | Reservasi p50 / p95 | Order p95 | Tiket terbit p95 | req/dtk | Stok yang "hilang" saat `SIGKILL` (dijepit reconciler) | Hasil `SIGKILL` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `everysec` (bawaan), 3 eksekusi | 1,5 / 3,1–8,5 | 16,7–128 | 1.007–1.145 ms | 150–152 | **11 slot** (5 penjepitan di kategori 5K, 3–5 menit setelah kill) | tiket ≤ kuota, 23 `needs_refund` |
+| `always`, 2 eksekusi | 3,0 / 8,9 dan 9,0 | 16,0 dan 19,4 | 1.005 ms | 150 | **0** | tiket ≤ kuota, 0 `needs_refund` (eksekusi tunggal) |
+
+`always` menggandakan p50 reservasi (1,5 → 3,0 ms) dan menaikkan p95 sedikit; throughput tidak berubah karena beban ditentukan kedatangan pengguna, bukan kapasitas, dan seluruhnya jauh di bawah ambang 300 ms. **Keputusan: bawaan produksi tetap `everysec`.** Alasan: dengan pagar database, kehilangan ≤1 dtk tulisan Redis tidak bisa lagi menjadi tiket berlebih, hanya order yang kelebihan menjadi `needs_refund` (23 dari 500 pada uji `SIGKILL` kasar saat 2.000 pengguna berebut, dengan Redis mati ±8 dtk) dan dijepit reconciler; harga `always` adalah latensi tetap dua kali lipat di setiap reservasi. Operator yang tidak mau ada pembeli yang perlu refund karena crash Redis boleh memilih `always` lewat `REDIS_APPENDFSYNC` di `.env.prod` (nilai selain `everysec|always|no` membuat Redis gagal start dengan pesan jelas; diuji). Angka satu mesin, bukan jaminan produksi.
+
+**Kunci batas per pembeli.** `RestoreUserLimits` (worker; `checkout/userlimits.go`) membangun ulang `{cat:<id>}:user:<uid>` dari order `paid` dan `pending` yang reservasinya masih berlaku, hanya menaikkan, idempoten, dengan TTL sama dengan aturan reservasi. Dipanggil saat stok kategori dimuat ulang (jalur yang juga dipakai checkout setelah Redis kosong) dan tiap ±2 menit oleh reconciler. Dipilih dibanding pemeriksaan database di checkout supaya jalur panas tetap satu skrip Lua. Jendela tersisa: pembeli yang kuncinya hilang bisa melewati batas sampai stok dimuat ulang atau putaran berikutnya (≤2 menit). Bukti: tes `TestUserLimitRestoredFromDatabase`; uji manual (pembeli lunas 1 tiket, batas 1, `FLUSHALL`, reservasi kedua tetap ditolak 409 `limit_exceeded`, pembeli lain 201); dan eksekusi `FLUSHALL` di bawah beban memulihkan batas 139 + 91 pembeli (log `batas per pembeli dipulihkan`).
+
+**Celah yang tersisa:** order yang ditolak pagar membuat pembeli membayar tanpa tiket sampai direfund (manual lewat portal/super admin; belum otomatis); slot order `needs_refund` tidak kembali ke penjualan (keputusan Tugas 6, stok sedikit di bawah kuota setelah chaos); perilaku "bayar telat" pada `FLUSHALL` di atas; antrean virtual hilang bila Redis kehilangan data. Satu eksekusi per konfigurasi, satu mesin.
 
 ## Temuan lain (di luar cakupan, dicatat saja)
 

@@ -118,6 +118,7 @@ type resp struct {
 	code int
 	body map[string]any
 	raw  string
+	hdr  http.Header
 }
 
 func (r resp) field(k string) string {
@@ -150,7 +151,7 @@ func (e *portalEnv) doH(user uuid.UUID, method, path string, body any, headers m
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)
-	out := resp{code: rec.Code, raw: rec.Body.String()}
+	out := resp{code: rec.Code, raw: rec.Body.String(), hdr: rec.Header()}
 	json.Unmarshal(rec.Body.Bytes(), &out.body) //nolint:errcheck
 	return out
 }

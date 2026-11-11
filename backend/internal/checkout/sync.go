@@ -25,7 +25,12 @@ func SyncCategory(ctx context.Context, db *pgxpool.Pool, inv *Inventory, categor
 	if err != nil {
 		return err
 	}
-	_, err = inv.Load(ctx, categoryID.String(), available)
+	loaded, err := inv.Load(ctx, categoryID.String(), available)
+	if err != nil || !loaded {
+		return err
+	}
+	// Stok baru dimuat (awal penjualan atau Redis kehilangan data): pulihkan juga batas per pembeli dari database.
+	_, err = RestoreUserLimits(ctx, db, inv, categoryID)
 	return err
 }
 

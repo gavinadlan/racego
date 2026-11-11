@@ -185,7 +185,7 @@ export function useOfflineScanner(org: string, eventId: string, user: { id: stri
         clockSkewMs: m?.clockSkewMs ?? cur.clockSkewMs,
       }));
     } catch (e) {
-      patch({ supported: true, error: errText(e, "Penyimpanan offline gagal dibuka.") + " Mode offline dimatikan; scan online tetap bisa." });
+      patch({ supported: false, error: errText(e, "Penyimpanan offline gagal dibuka.") + " Mode offline dimatikan; scan online tetap bisa." });
     }
   }, [eventId, user, patch, recount]);
 

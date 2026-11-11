@@ -50,6 +50,9 @@ jobs:
       - name: Migrasi + data seed
         # Beberapa tes integrasi memakai akun & event dari migrations/seed.sql.
         run: go run ./cmd/migrate up && go run ./cmd/migrate seed
+      - name: gofmt
+        working-directory: .
+        run: out="$(gofmt -l backend)"; test -z "$out" || (echo "$out"; exit 1)
       - name: go vet
         run: go vet ./...
       - name: go test

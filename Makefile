@@ -64,7 +64,10 @@ dev: ## Jalankan api + worker + web sekaligus
 
 test: test-backend lint-web ## Semua tes
 
-test-backend: ## Tes backend (butuh make up: tes Postgres memakai DATABASE_URL bila RACEGO_TEST_DATABASE_URL kosong)
+fmt-check: ## Gagal bila ada berkas Go yang belum rapi (gofmt -l)
+	@out="$$(gofmt -l backend)"; test -z "$$out" || (echo "gofmt: berkas belum rapi (jalankan gofmt -w):"; echo "$$out"; exit 1)
+
+test-backend: fmt-check ## Tes backend (butuh make up: tes Postgres memakai DATABASE_URL bila RACEGO_TEST_DATABASE_URL kosong)
 	cd backend && go vet ./... && RACEGO_TEST_DATABASE_URL=$${RACEGO_TEST_DATABASE_URL:-$$DATABASE_URL} go test ./...
 
 lint-web: ## Lint + type-check frontend

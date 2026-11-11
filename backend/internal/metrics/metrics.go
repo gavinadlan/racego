@@ -53,6 +53,16 @@ var (
 		Help: "Slot stok Redis yang diturunkan paksa karena melebihi kuota − order aktif (tanda Redis kehilangan tulisan).",
 	})
 
+	UserLimitsRestored = f.NewCounter(prometheus.CounterOpts{
+		Name: "racego_user_limits_restored_total",
+		Help: "Hitungan slot per pembeli di Redis yang dinaikkan dari database (tanda Redis kehilangan kunci).",
+	})
+
+	StockGuardRejections = f.NewCounter(prometheus.CounterOpts{
+		Name: "racego_stock_guard_rejections_total",
+		Help: "Order lunas yang ditolak pagar kuota di database (Redis mengizinkan lebih dari kuota) lalu menjadi needs_refund.",
+	})
+
 	QueueAdmitted = f.NewCounter(prometheus.CounterOpts{
 		Name: "racego_queue_admitted_total", Help: "Peserta antrean yang dipanggil (semua event).",
 	})

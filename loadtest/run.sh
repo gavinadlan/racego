@@ -13,6 +13,8 @@ K6_IMAGE="grafana/k6:2.3.0"
 DB_URL="${LOADTEST_DATABASE_URL:-postgres://racego:racego@localhost:55439/racego_loadtest?sslmode=disable}"
 REDIS="${LOADTEST_REDIS_ADDR:-localhost:6381}"
 API_ADDR="127.0.0.1:18080"
+# BACKEND_DIR: bangun dan jalankan biner dari pohon kode lain (mis. git worktree versi lama untuk perbandingan sebelum/sesudah).
+BACKEND_DIR="${BACKEND_DIR:-$ROOT/backend}"
 
 # Pengaman: jangan pernah menyentuh data development.
 dbname="${DB_URL##*/}"; dbname="${dbname%%\?*}"
@@ -47,7 +49,7 @@ start_one() { # api | worker
   running "$1" && return 0
   ulimit -n 65536 2>/dev/null || ulimit -n 10240 # ribuan koneksi bersamaan (bawaan macOS hanya 256)
   # exec: PID yang dicatat adalah biner itu sendiri, bukan shell pembungkus.
-  (cd "$ROOT/backend" && exec nohup "${backend_env[@]}" "./bin/$1" >>"$RESULTS/$1.log" 2>&1) &
+  (cd "$BACKEND_DIR" && exec nohup "${backend_env[@]}" "./bin/$1" >>"$RESULTS/$1.log" 2>&1) &
   echo $! >"$RESULTS/$1.pid"
 }
 
@@ -68,11 +70,11 @@ case "$cmd" in
   up) # infra + skema + data contoh (untuk skenario browse) + biner
     target
     "${COMPOSE[@]}" up -d --wait
-    (cd "$ROOT/backend" && go build -o bin/ ./cmd/api ./cmd/worker ./cmd/migrate)
-    (cd "$ROOT/backend" && "${backend_env[@]}" ./bin/migrate up && "${backend_env[@]}" ./bin/migrate seed)
+    (cd "$BACKEND_DIR" && go build -o bin/ ./cmd/api ./cmd/worker ./cmd/migrate)
+    (cd "$BACKEND_DIR" && "${backend_env[@]}" ./bin/migrate up && "${backend_env[@]}" ./bin/migrate seed)
     ;;
   start)
-    (cd "$ROOT/backend" && go build -o bin/ ./cmd/api ./cmd/worker ./cmd/migrate)
+    (cd "$BACKEND_DIR" && go build -o bin/ ./cmd/api ./cmd/worker ./cmd/migrate)
     start_one api; start_one worker; wait_api
     echo "✓ API + worker uji berjalan (log: loadtest/results/api.log, worker.log)"
     ;;
@@ -81,14 +83,14 @@ case "$cmd" in
   start-worker) start_one worker ;;
   seed) # USERS, QUOTA, QUEUE=true|false, OPEN_IN
     target
-    (cd "$ROOT/backend" && "${backend_env[@]}" ./bin/migrate loadgen-seed --users "${USERS:-100}" --quota "${QUOTA:-500}" \
+    (cd "$BACKEND_DIR" && "${backend_env[@]}" ./bin/migrate loadgen-seed --users "${USERS:-100}" --quota "${QUOTA:-500}" \
       --queue="${QUEUE:-true}" --open-in "${OPEN_IN:-75s}" --out "$RESULTS/seed.json")
     ;;
   check) # SETTLE=4m menunggu hold/order yang ditinggal habis
-    (cd "$ROOT/backend" && "${backend_env[@]}" ./bin/migrate loadgen-check --seed "$RESULTS/seed.json" \
-      --settle "${SETTLE:-0}" --converge "${CONVERGE:-60s}" --json "$RESULTS/${NAME:-check}-integrity.json")
+    (cd "$BACKEND_DIR" && "${backend_env[@]}" ./bin/migrate loadgen-check --seed "$RESULTS/seed.json" \
+      --settle "${SETTLE:-0}" --converge "${CONVERGE:-60s}" ${CHAOS:+--allow-needs-refund} --json "$RESULTS/${NAME:-check}-integrity.json")
     ;;
-  run) # run <browse|war|war-noqueue|soak>; CHAOS=redis|redis-kill|worker untuk gangguan saat war
+  run) # run <browse|war|war-noqueue|soak>; CHAOS=redis|redis-kill|redis-flush|worker untuk gangguan saat war
     scenario="${1:?pemakaian: run.sh run <browse|war|war-noqueue|soak>}"
     users="${USERS:-100}"
     name="${NAME:-$scenario-$users${CHAOS:+-chaos-$CHAOS}}"
@@ -112,6 +114,7 @@ case "$cmd" in
         echo "$(date +%T) CHAOS $CHAOS mulai" | tee -a "$RESULTS/$name-chaos.log"
         case "$CHAOS" in
           redis) "${COMPOSE[@]}" stop redis; sleep "${CHAOS_DOWN:-8}"; "${COMPOSE[@]}" start redis ;;
+          redis-flush) "${COMPOSE[@]}" exec -T redis redis-cli FLUSHALL ;; # Redis kehilangan semua kunci, tanpa mati
           redis-kill) "${COMPOSE[@]}" kill -s SIGKILL redis; sleep "${CHAOS_DOWN:-8}"; "${COMPOSE[@]}" start redis ;;
           worker) "$0" stop-worker; sleep "${CHAOS_DOWN:-25}"; "$0" start-worker ;;
         esac >>"$RESULTS/$name-chaos.log" 2>&1

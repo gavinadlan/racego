@@ -90,7 +90,7 @@ Demo sementara dari laptop tanpa server atau domain: `make demo` (butuh `cloudfl
 | Beranda: pencarian, race terdekat + hitung mundur, segera dibuka, kalender, arsip | |
 | Kalender bulanan & daftar, arsip race, halaman penyelenggara | 2FA super admin, retensi data verifikasi |
 | Multi-tenant (mitra, peran, isolasi data) | |
-| Reservasi atomik Redis + timer + pengembalian kuota | Anti multi-akun, ballot (Turnstile opsional sudah ada) |
+| Reservasi atomik Redis + timer + pengembalian kuota; **pagar kuota di database** (tiket tidak pernah melebihi kuota walau Redis rusak) + rekonsiliasi stok/batas per pembeli ([docs/03](docs/03-war-tiket.md#pelindung-berlapis-tugas-11)) | Anti multi-akun, ballot (Turnstile opsional sudah ada) |
 | Antrian virtual opsional per event (lobi diundi, pemanggilan bertahap, pass HMAC) | Antrian lintas event |
 | Order idempotent, Midtrans Snap (sandbox) & mode mock | Pencairan ke Iris sandbox sungguhan (klien teruji server palsu), ganti rekening |
 | Webhook idempotent + verifikasi signature + outbox | Undangan staf via email |

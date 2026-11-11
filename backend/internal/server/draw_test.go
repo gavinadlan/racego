@@ -385,6 +385,9 @@ func TestDrawPoolHashAndCSVAndPublic(t *testing.T) {
 	}
 	e.must(e.do(e.owner, "PUT", e.base+"/draw/settings", map[string]any{"draw_eligibility": "attended", "allow_multiple_wins": false, "draw_public": true}), 200)
 	pr := e.must(e.do(uuid.Nil, "GET", pub, nil), 200)
+	if !strings.Contains(pr.hdr.Get("X-Robots-Tag"), "noindex") {
+		t.Fatalf("X-Robots-Tag hasil publik: %q", pr.hdr.Get("X-Robots-Tag"))
+	}
 	for _, bad := range []string{"@", "peserta@uji.test", "Peserta 0", "email", "phone", "id_number", "full_name", "pool_hash"} {
 		if strings.Contains(pr.raw, bad) {
 			t.Fatalf("hasil publik memuat %q: %s", bad, pr.raw)

@@ -89,8 +89,11 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDISCLI_AUTH: ${REDIS_PASSWORD}
+      REDIS_APPENDFSYNC: ${REDIS_APPENDFSYNC:-everysec}
     # appendonly: kuota & antrian tetap ada setelah restart. noeviction: kunci stok tidak boleh dibuang.
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction"]
+    # appendfsync everysec (bawaan): kehilangan <=1 dtk tulisan saat crash; pagar kuota di database + rekonsiliasi
+    # menutupnya (docs/11-performa.md). Nilai tidak valid -> gagal start dengan pesan jelas.
+    command: ["sh", "-c", "case \"$$REDIS_APPENDFSYNC\" in everysec|always|no) ;; *) echo \"REDIS_APPENDFSYNC harus everysec, always, atau no (nilai sekarang: $$REDIS_APPENDFSYNC)\" >&2; exit 1;; esac; exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --appendfsync \"$$REDIS_APPENDFSYNC\" --maxmemory 256mb --maxmemory-policy noeviction"]
     volumes:
       - redisdata:/data
     healthcheck:

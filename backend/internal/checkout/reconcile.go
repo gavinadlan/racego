@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gavinadlan/racego/backend/internal/metrics"
@@ -18,14 +19,19 @@ import (
 // terlihat sebagai kelebihan sesaat (milidetik), sedangkan kerusakan akibat crash menetap.
 // ponytail: celah pembeli bisa oversell di antara crash dan putaran kedua (≤2 putaran, 30 detik);
 // perkecil dengan appendfsync always di Redis bila itu tidak bisa diterima.
+// userLimitEvery: pemulihan batas per pembeli dijalankan tiap N putaran rekonsiliasi.
+const userLimitEvery = 8
+
 type StockReconciler struct {
+	db      *pgxpool.Pool
 	inv     *Inventory
+	runs    int
 	caps    func(ctx context.Context, ids []string) (map[string]int, error)
 	suspect map[string]bool
 }
 
 func NewStockReconciler(db *pgxpool.Pool, inv *Inventory) *StockReconciler {
-	return &StockReconciler{inv: inv, suspect: map[string]bool{}, caps: func(ctx context.Context, ids []string) (map[string]int, error) {
+	return &StockReconciler{db: db, inv: inv, suspect: map[string]bool{}, caps: func(ctx context.Context, ids []string) (map[string]int, error) {
 		rows, err := db.Query(ctx, `
 			SELECT c.id::text, c.quota - COALESCE(sum(o.qty) FILTER (WHERE o.status IN ('pending', 'paid')), 0)
 			FROM ticket_categories c LEFT JOIN orders o ON o.category_id = c.id
@@ -52,6 +58,17 @@ func (r *StockReconciler) Run(ctx context.Context) (slots int, err error) {
 	ids, err := r.inv.ActiveCategories(ctx)
 	if err != nil || len(ids) == 0 {
 		return 0, err
+	}
+	// Tiap 8 putaran (≈2 menit): pulihkan batas per pembeli yang kuncinya hilang (kehilangan tulisan tanpa muat ulang stok).
+	r.runs++
+	if r.runs%userLimitEvery == 0 {
+		for _, id := range ids {
+			if cid, perr := uuid.Parse(id); perr == nil {
+				if _, err := RestoreUserLimits(ctx, r.db, r.inv, cid); err != nil {
+					slog.WarnContext(ctx, "pulihkan batas per pembeli", "category_id", id, "err", err)
+				}
+			}
+		}
 	}
 	caps, err := r.caps(ctx, ids)
 	if err != nil {

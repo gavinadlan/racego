@@ -175,6 +175,8 @@ API dan worker bisa menyajikan metrik Prometheus (`/metrics`) di **listener terp
 
 Cek cepat setelah deploy: `curl -sk -o /dev/null -w '%{http_code}\n' https://SITE_ADDRESS/metrics` harus `404`.
 
+**Access log dan token undangan.** Tautan undangan staf memuat token di path (`/undangan/<token>`). Caddy tidak mencatat access log secara bawaan di paket ini; **jangan menyalakannya tanpa menyaring path `/undangan/`** (mis. blok `log` dengan filter `delete`/`replace` pada `request>uri`), karena token mentah akan tersimpan di berkas log. Hal yang sama berlaku untuk log proxy atau CDN apa pun di depan Caddy. `next dev` mencetak path itu di terminal hanya pada mode pengembangan; server produksi (`next start`) tidak.
+
 ## 5. Operasional sehari-hari
 
 | Kebutuhan | Perintah |

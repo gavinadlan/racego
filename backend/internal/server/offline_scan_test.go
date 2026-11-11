@@ -280,7 +280,7 @@ func TestScanBatch(t *testing.T) {
 	var src, dev string
 	var atDevice, collectedAt time.Time
 	e.db.QueryRow(ctx, `SELECT count(*), max(source), max(device_id::text), max(scanned_at_device) FROM scan_logs WHERE client_op_id = $1`, first["client_op_id"]).Scan(&logs, &src, &dev, &atDevice) //nolint:errcheck
-	e.db.QueryRow(ctx, `SELECT collected_at FROM tickets WHERE id = $1`, ids[0]).Scan(&collectedAt)                                                                                  //nolint:errcheck
+	e.db.QueryRow(ctx, `SELECT collected_at FROM tickets WHERE id = $1`, ids[0]).Scan(&collectedAt)                                                                                                   //nolint:errcheck
 	if logs != 1 || src != "offline_sync" || dev != devA || !atDevice.Equal(skewed) || time.Since(collectedAt) > time.Minute {
 		t.Fatalf("log: %d %s %s %v; collected_at %v", logs, src, dev, atDevice, collectedAt)
 	}
@@ -379,7 +379,7 @@ func TestScanOnlineUnchanged(t *testing.T) {
 			t.Fatalf("scan %d: %s", i, r.raw)
 		}
 	}
-	if r := e.must(e.do(owner, "POST", path, map[string]any{"token": tokens[0][:len(tokens[0])-2] + "AA"}), 200); r.body["result"] != "invalid" {
+	if r := e.must(e.do(owner, "POST", path, map[string]any{"token": tamperMiddle(tokens[0])}), 200); r.body["result"] != "invalid" {
 		t.Fatalf("palsu: %s", r.raw)
 	}
 	var n int
@@ -387,4 +387,15 @@ func TestScanOnlineUnchanged(t *testing.T) {
 	if n != 3 {
 		t.Fatalf("log online: %d", n)
 	}
+}
+
+// tamperMiddle mengubah satu karakter di tengah token (bagian bertanda tangan): selalu mengubah byte hasil decode,
+// tidak seperti karakter terakhir base64url yang sebagian bitnya diabaikan decoder.
+func tamperMiddle(tok string) string {
+	mid := len(tok) / 2
+	flip := "A"
+	if tok[mid:mid+1] == "A" {
+		flip = "B"
+	}
+	return tok[:mid] + flip + tok[mid+1:]
 }

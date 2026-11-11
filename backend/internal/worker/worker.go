@@ -229,6 +229,26 @@ func (w *Worker) onOrderPaid(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, 
 	if o.Status != "paid" {
 		return nil
 	}
+	// Pagar database SEBELUM Redis: database adalah sumber kebenaran jumlah tiket sah, Redis hanya jalur cepat.
+	// Bila Redis terlalu longgar (kosong/hilang tulisan) dan kuota sudah penuh, order ini tidak boleh terbit.
+	if err := ticket.CheckQuota(ctx, tx, o.ID); err != nil {
+		if !errors.Is(err, ticket.ErrQuotaExceeded) {
+			return err
+		}
+		// Kembalikan hold bila masih ada (menurunkan hitungan pembeli di Redis); stok yang terlalu longgar
+		// dijepit StockReconciler karena order needs_refund tidak lagi dihitung. Aman diulang.
+		if hold, found, err := w.inv.GetHold(ctx, o.CategoryID.String(), o.ReservationID); err != nil {
+			return err
+		} else if found {
+			if _, err := w.inv.Release(ctx, o.CategoryID.String(), o.ReservationID, hold); err != nil {
+				return err
+			}
+		}
+		metrics.StockGuardRejections.Inc()
+		slog.WarnContext(ctx, "pagar kuota database menolak penerbitan → perlu refund", "order_id", o.ID, "category_id", o.CategoryID)
+		_, err := tx.Exec(ctx, `UPDATE orders SET status = 'needs_refund' WHERE id = $1`, o.ID)
+		return err
+	}
 	res, err := w.inv.Confirm(ctx, o.CategoryID.String(), o.ReservationID, o.BuyerID.String(), o.Qty)
 	if err != nil {
 		return err
