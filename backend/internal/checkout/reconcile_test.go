@@ -96,3 +96,46 @@ func TestStockReconcilerIgnoresTransientAndNeverRaises(t *testing.T) {
 		t.Fatalf("kategori belum dimuat: clamped=%v err=%v", clamped, err)
 	}
 }
+
+// Dua worker hidup: worker lain menandai order kedaluwarsa DAN mengembalikan slotnya tepat di antara pembacaan
+// batas (database) dan stok (Redis). Batas yang sudah basi tidak boleh menjepit stok yang sah (slot hilang dari
+// penjualan), walau terjadi di dua putaran berturut-turut.
+func TestStockReconcilerOtherWorkerReleasesMidRound(t *testing.T) {
+	inv, _ := newInventory(t)
+	ctx := context.Background()
+	const quota = 10
+	inv.Load(ctx, "c", quota) //nolint:errcheck
+	now := time.Now()
+	var rids []string
+	for i := 0; i < 4; i++ {
+		res, err := reserve(inv, "c", fmt.Sprint("u", i), 1, 1, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rids = append(rids, res.ID)
+	}
+	active := 4 // order pending di database
+	otherWorker := func() {
+		if _, err := inv.Release(ctx, "c", rids[0], Hold{UserID: fmt.Sprint("u", 4-len(rids)), Qty: 1}); err != nil {
+			t.Fatal(err)
+		}
+		rids = rids[1:]
+		active--
+	}
+	calls := 0
+	r := &StockReconciler{inv: inv, suspect: map[string]bool{}, caps: func(context.Context, []string) (map[string]int, error) {
+		out := map[string]int{"c": quota - active}
+		if calls++; calls <= 2 {
+			otherWorker()
+		}
+		return out, nil
+	}}
+	for i := 0; i < 2; i++ {
+		if n, err := r.Run(ctx); err != nil || n != 0 {
+			t.Fatalf("putaran %d: %d slot sah dijepit (err %v)", i+1, n, err)
+		}
+	}
+	if s, _, _ := inv.Available(ctx, "c"); s != quota-active {
+		t.Fatalf("stok %d, harus %d: slot hilang dari penjualan", s, quota-active)
+	}
+}

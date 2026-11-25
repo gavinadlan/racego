@@ -23,6 +23,11 @@ redis.call('SET', KEYS[5], ARGV[6], 'NX')
 redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now)
 
 local last = tonumber(redis.call('HGET', KEYS[4], 'last_ms') or (now - 1000))
+-- Jam antar worker bisa berbeda: last_ms tidak pernah mundur, supaya waktu yang sama tidak dihitung dua kali.
+-- Jam yang melenceng > 30 detik diabaikan: satu worker berjam ngawur tidak boleh menghentikan antrian.
+if last > now + 30000 then
+  last = now
+end
 local elapsed = math.max(0, math.min(now - last, 1000))
 local budget = tonumber(redis.call('HGET', KEYS[4], 'budget') or '0') + rate * elapsed / 1000
 budget = math.min(budget, rate) -- jatah tidak menumpuk lebih dari satu detik
@@ -52,7 +57,7 @@ end
 
 budget = budget - #admitted
 local total = redis.call('HINCRBY', KEYS[4], 'admitted_total', #admitted)
-redis.call('HSET', KEYS[4], 'last_ms', now, 'budget', tostring(budget))
+redis.call('HSET', KEYS[4], 'last_ms', math.max(now, last), 'budget', tostring(budget))
 
 -- Laju panggil terukur (untuk perkiraan waktu tunggu): rata-rata per jendela 15 detik, dihaluskan.
 local markMs = tonumber(redis.call('HGET', KEYS[4], 'mark_ms') or '0')

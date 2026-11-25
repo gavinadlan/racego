@@ -88,6 +88,17 @@ func (r *StockReconciler) Run(ctx context.Context) (slots int, err error) {
 			r.suspect[id] = true
 			continue
 		}
+		// Worker lain bisa mengembalikan slot di antara pembacaan batas dan stok di atas: hitung ulang batasnya
+		// SETELAH stok dibaca, dan jepit hanya bila stok itu melebihi keduanya.
+		fresh, err := r.caps(ctx, []string{id})
+		if err != nil {
+			return slots, err
+		}
+		cap = max(cap, fresh[id])
+		if stock <= cap {
+			delete(r.suspect, id)
+			continue
+		}
 		before, clamped, err := r.inv.ClampStock(ctx, id, cap)
 		if err != nil {
 			return slots, err
