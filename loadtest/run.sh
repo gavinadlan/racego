@@ -7,8 +7,16 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RESULTS="$ROOT/loadtest/results"
-COMPOSE=(docker compose -f "$ROOT/docker-compose.loadtest.yml")
+# --env-file /dev/null: compose otomatis membaca .env di root untuk interpolasi; nilai development tidak boleh bocor ke uji.
+COMPOSE=(docker compose --env-file /dev/null -f "$ROOT/docker-compose.loadtest.yml")
 K6_IMAGE="grafana/k6:2.3.0"
+# SCALE=N: N replika API + WORKERS worker di container berbatas CPU, di belakang nginx (docker-compose.loadtest.scale.yml).
+# Kosong = satu API + satu worker native seperti biasa. PGBOUNCER=1: API lewat PgBouncer (hanya dengan SCALE).
+SCALE="${SCALE:-}"
+if [[ -n "$SCALE" ]]; then
+  [[ "$SCALE" =~ ^[1-8]$ ]] || { echo "SCALE harus 1..8" >&2; exit 2; }
+  COMPOSE+=(-f "$ROOT/docker-compose.loadtest.scale.yml")
+fi
 
 DB_URL="${LOADTEST_DATABASE_URL:-postgres://racego:racego@localhost:55439/racego_loadtest?sslmode=disable}"
 REDIS="${LOADTEST_REDIS_ADDR:-localhost:6381}"
@@ -45,11 +53,29 @@ target() {
 
 running() { [[ -f "$RESULTS/$1.pid" ]] && kill -0 "$(cat "$RESULTS/$1.pid")" 2>/dev/null; }
 
+scale_up() {
+  (cd "$BACKEND_DIR" && CGO_ENABLED=0 GOOS=linux go build -o bin/linux/ ./cmd/api ./cmd/worker)
+  local db=postgres:5432
+  if [[ -n "${PGBOUNCER:-}" ]]; then # lebih dulu: API berhenti bila database belum menjawab saat start
+    db=pgbouncer:6432
+    SCALE_BIN="$BACKEND_DIR/bin/linux" "${COMPOSE[@]}" --profile pgbouncer up -d --wait pgbouncer
+    for _ in $(seq 50); do "${COMPOSE[@]}" exec -T pgbouncer nc -z 127.0.0.1 6432 2>/dev/null && break; sleep 0.2; done
+  fi
+  SCALE_BIN="$BACKEND_DIR/bin/linux" API_DB_HOST="$db" "${COMPOSE[@]}" ${PGBOUNCER:+--profile pgbouncer} up -d --wait \
+    --scale api="$SCALE" --scale worker="${WORKERS:-1}" 
+}
+
+sampler_pid=""
+start_sampler() {
+  python3 "$ROOT/loadtest/stats.py" sample "$RESULTS" "$1" &
+  sampler_pid=$!
+}
+
 start_one() { # api | worker
   running "$1" && return 0
-  ulimit -n 65536 2>/dev/null || ulimit -n 10240 # ribuan koneksi bersamaan (bawaan macOS hanya 256)
+  ulimit -n 65536 2>/dev/null || ulimit -n 61000 2>/dev/null || ulimit -n 10240 # ribuan koneksi bersamaan (bawaan macOS hanya 256)
   # exec: PID yang dicatat adalah biner itu sendiri, bukan shell pembungkus.
-  (cd "$BACKEND_DIR" && exec nohup "${backend_env[@]}" "./bin/$1" >>"$RESULTS/$1.log" 2>&1) &
+  (cd "$BACKEND_DIR" && exec nohup "${backend_env[@]}" $([[ $1 == worker ]] && echo "DB_MAX_CONNS=20") "./bin/$1" >>"$RESULTS/$1.log" 2>&1) &
   echo $! >"$RESULTS/$1.pid"
 }
 
@@ -74,11 +100,17 @@ case "$cmd" in
     (cd "$BACKEND_DIR" && "${backend_env[@]}" ./bin/migrate up && "${backend_env[@]}" ./bin/migrate seed)
     ;;
   start)
+    if [[ -n "$SCALE" ]]; then
+      scale_up; wait_api
+      echo "✓ $SCALE replika API + ${WORKERS:-1} worker uji di belakang nginx (log: docker compose logs)"; exit 0
+    fi
     (cd "$BACKEND_DIR" && go build -o bin/ ./cmd/api ./cmd/worker ./cmd/migrate)
     start_one api; start_one worker; wait_api
     echo "✓ API + worker uji berjalan (log: loadtest/results/api.log, worker.log)"
     ;;
-  stop) stop_one api; stop_one worker; echo "✓ API + worker uji berhenti" ;;
+  stop)
+    [[ -z "$SCALE" ]] || "${COMPOSE[@]}" --profile pgbouncer rm -sf api worker lb pgbouncer
+    stop_one api; stop_one worker; echo "✓ API + worker uji berhenti" ;;
   stop-worker) stop_one worker ;;
   start-worker) start_one worker ;;
   seed) # USERS, QUOTA, QUEUE=true|false, OPEN_IN
@@ -116,19 +148,28 @@ case "$cmd" in
           redis) "${COMPOSE[@]}" stop redis; sleep "${CHAOS_DOWN:-8}"; "${COMPOSE[@]}" start redis ;;
           redis-flush) "${COMPOSE[@]}" exec -T redis redis-cli FLUSHALL ;; # Redis kehilangan semua kunci, tanpa mati
           redis-kill) "${COMPOSE[@]}" kill -s SIGKILL redis; sleep "${CHAOS_DOWN:-8}"; "${COMPOSE[@]}" start redis ;;
+          replica) # rolling restart: SIGTERM satu replika (graceful), tunggu, nyalakan lagi
+            one="$("${COMPOSE[@]}" ps -q api | head -1)"
+            docker stop -t 15 "$one"; sleep "${CHAOS_DOWN:-10}"; docker start "$one" ;;
+          replica-kill) one="$("${COMPOSE[@]}" ps -q api | head -1)"
+            docker kill "$one"; sleep "${CHAOS_DOWN:-10}"; docker start "$one" ;;
           worker) "$0" stop-worker; sleep "${CHAOS_DOWN:-25}"; "$0" start-worker ;;
         esac >>"$RESULTS/$name-chaos.log" 2>&1
         echo "$(date +%T) CHAOS $CHAOS selesai" | tee -a "$RESULTS/$name-chaos.log" ) &
     fi
     rc=0
-    docker run --rm -i --user "$(id -u):$(id -g)" --ulimit nofile=65536:65536 \
+    start_sampler "$name"
+    net=(); base=http://host.docker.internal:18080
+    if [[ -n "$SCALE" ]]; then net=(--network racego-loadtest_default --cpus "${K6_CPUS:-3}"); base=http://lb; fi
+    docker run --rm -i --name racego-loadtest-k6 --memory "${K6_MEM:-5500m}" ${net[@]+"${net[@]}"} --user "$(id -u):$(id -g)" --ulimit nofile=65536:65536 \
       --add-host host.docker.internal:host-gateway \
       -v "$ROOT/loadtest:/loadtest:ro" -v "$RESULTS:/results" \
-      -e BASE_URL="${BASE_URL:-http://host.docker.internal:18080}" -e SEED_FILE=/results/seed.json \
+      -e BASE_URL="${BASE_URL:-$base}" -e SEED_FILE=/results/seed.json \
       -e USERS="$users" -e VUS="${VUS:-}" -e DURATION="${DURATION:-}" -e BUY_RATE="${BUY_RATE:-}" \
       -e ARRIVAL="${ARRIVAL:-}" -e WAR_MINUTES="${WAR_MINUTES:-}" -e ABANDON="${ABANDON:-}" -e CHAOS="${CHAOS:-}" \
       "$K6_IMAGE" run --quiet --summary-trend-stats "avg,min,med,p(90),p(95),p(99),max" \
       --summary-export "/results/$name-summary.json" "/loadtest/$script.js" 2>&1 | tee "$RESULTS/$name-k6.log" || rc=$?
+    kill "$sampler_pid" 2>/dev/null || true
     wait || true
     if [[ "$scenario" != browse ]]; then
       NAME="$name" SETTLE="${SETTLE:-4m}" "$0" check 2>&1 | tee "$RESULTS/$name-integrity.log" || rc=1

@@ -14,6 +14,10 @@ Semua angka di sini berasal dari eksekusi nyata di satu laptop (lihat [Batasan](
 | Overhead metrik | Tidak terukur (di dalam derau) |
 | Biaya observabilitas | Prometheus ±40 MiB, Grafana ±130–340 MiB, CPU < 6% satu core. Opsional, tidak ikut stack produksi |
 
+### Lanjutan: skala (Tugas 13)
+
+Batas di atas 5.000 pengguna, scale-out API, audit multi-instance, PgBouncer, dan cache baca diukur terpisah di [13-skala-lanjutan.md](13-skala-lanjutan.md) (satu laptop, median 3 eksekusi untuk yang dibandingkan). Ringkasnya: 10.000 pengguna dengan antrean lulus pada satu instance; `war-noqueue` 5.000 berada di sekitar ambang 300 ms dan `DB_MAX_CONNS` 20/50/100 tidak terbedakan; dengan 0,5 core per replika p95 reservasi turun dari 421 (N=1) ke 184 (N=2) dan 131 ms (N=4); PgBouncer dan cache dalam proses diuji dan **tidak** diterapkan. `evalsha` p95 ≤ 100 ms yang dulu dugaan terbukti sebagai antre pool klien Redis di proses API.
+
 ## Lingkungan
 
 | | |
@@ -232,13 +236,15 @@ Totalnya sekitar 170–380 MiB RAM dan I/O disk kecil: terlalu mahal untuk VPS 1
 - 5.000 pengguna adalah **pengguna aktif bersamaan** di satu mesin. Bukan "5.000 orang di internet": koneksi dari 5.000 perangkat berbeda berperilaku lain (reconnect, jaringan buruk, bot).
 - `RESERVATION_TTL=1m` dan batas tunggu 5 menit membuat banyak pengguna terlihat "masih menunggu"; itu parameter uji.
 - Kuota kecil (500) dibanding ukuran pengguna; event berkuota puluhan ribu belum diuji. Satu kategori panas berada di satu slot Redis (hash tag `{cat:<id>}`), jadi throughput per kategori dibatasi satu thread Redis.
-- Tidak ada pengujian dari beberapa wilayah, terhadap Midtrans/Cloudflare sungguhan, dengan Redis Cluster, atau dengan banyak instance API/worker.
+- Tidak ada pengujian dari beberapa wilayah, terhadap Midtrans/Cloudflare sungguhan, atau dengan Redis Cluster. Banyak instance API/worker: lihat [docs 13](13-skala-lanjutan.md).
 - Chaos hanya tiga gangguan sederhana, masing-masing sekali. Tidak diuji: Postgres mati, jaringan terpisah sebagian, disk penuh, API mati di tengah `CreateOrder`.
 - Alerting, tracing, dan log terpusat di luar cakupan dan belum ada.
 
 ## Peta skala bertahap
 
-Urutan di bawah mengikuti temuan, bukan firasat: lakukan berikutnya hanya bila metrik menunjukkan perlu. Tidak ada klaim bahwa langkah-langkah ini sudah diuji.
+Langkah 3 (naikkan `DB_MAX_CONNS`), 5 (PgBouncer), dan 6 (beberapa instance) sudah diuji: [hasilnya](13-skala-lanjutan.md#rekomendasi-berurutan). Menaikkan `DB_MAX_CONNS` tidak terbukti menurunkan p95, dan menambah replika API terbukti.
+
+Urutan di bawah mengikuti temuan, bukan firasat: lakukan berikutnya hanya bila metrik menunjukkan perlu. Langkah selain yang disebut di atas belum diuji.
 
 | # | Langkah | Kapan | Biaya |
 | --- | --- | --- | --- |

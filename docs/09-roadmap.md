@@ -53,6 +53,8 @@ Urut dari yang paling berdampak. Centang bila selesai.
 - [x] Metrik dasar: `/metrics` Prometheus di listener terpisah (HTTP per pola rute, reservasi, antrean, order, outbox, pool DB, Redis, email, pencairan/refund), dashboard Grafana lokal opsional (`make obs-up`)
 - [x] Uji beban k6 dengan angka: `browse`, `war`, `war-noqueue`, `soak`, chaos ringan, pemeriksaan integritas otomatis; hasil di [11-performa.md](11-performa.md)
 - [ ] Sisa observabilitas: alerting (Alertmanager), tracing terdistribusi (OpenTelemetry), log terpusat, metrik per event untuk mitra
+- [x] Batas di atas 5.000 pengguna, scale-out API N=1/2/4 + 2 worker, rolling restart, audit aman-multi-instance ([13](13-skala-lanjutan.md)); PgBouncer dan cache baca di proses API diuji, tidak terbukti, tidak diterapkan
+- [ ] Sisa multi-instance: penyimpanan unggahan/KYC bersama, kunci `migrate up`, `RestoreUserLimits` di antara dua worker, `/healthz` yang tidak bergantung pool, drain readiness; batas percobaan OTP serentak ([13](13-skala-lanjutan.md#a-audit-aman-multi-instance))
 - [ ] Uji beban dari mesin terpisah dan lewat jaringan nyata (sekarang generator dan server berbagi CPU)
 - [x] CI GitHub Actions: tes backend dengan Postgres, lint/build frontend, build image
 - [x] Paket deploy satu server: Docker Compose + Caddy (HTTPS otomatis), backup/restore teruji, `make demo` via Cloudflare quick tunnel

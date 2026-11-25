@@ -1,0 +1,79 @@
+# Tambahan UJI SAJA di atas docker-compose.loadtest.yml: N replika API di belakang satu load balancer (docs/13-skala-lanjutan.md).
+# Dipanggil loadtest/run.sh dengan SCALE=N (--scale api=N). Batas CPU per container SAMA untuk semua N, supaya
+# replika tambahan benar-benar menambah kapasitas. Semua port hanya di 127.0.0.1.
+x-backend: &backend
+  image: alpine:3
+  volumes: ["${SCALE_BIN:-./backend/bin/linux}:/app:ro"]
+  tmpfs: [/data]
+  ulimits: { nofile: 65536 }
+  environment: &env
+    APP_ENV: development
+    HTTP_ADDR: ":8080"
+    FRONTEND_URL: http://localhost:3000
+    # k6 mengirim X-Forwarded-For = IP pengguna sintetis (meniru proxy tepi); nginx menambah satu entri lagi di kanan.
+    # Dua hop tepercaya: entri kedua dari kanan = IP pengguna, jadi pembatas laju per IP tetap per pengguna.
+    TRUSTED_PROXY_HOPS: "2"
+    DATABASE_URL: postgres://racego:racego@${API_DB_HOST:-postgres:5432}/racego_loadtest?sslmode=disable
+    REDIS_ADDR: redis:6379
+    SMTP_ADDR: mailpit:1025
+    DB_MAX_CONNS: ${DB_MAX_CONNS:-20}
+    RESERVATION_TTL: ${RESERVATION_TTL:-1m}
+    QUEUE_ADMIT_PER_SEC: ${QUEUE_ADMIT_PER_SEC:-20}
+    QUEUE_MAX_ACTIVE: ${QUEUE_MAX_ACTIVE:-300}
+    UPLOAD_DIR: /data/uploads
+    KYC_DIR: /data/kyc
+    METRICS_TOKEN: loadtest-metrics-token-lokal-saja-bukan-rahasia
+    METRICS_ADDR: ":9464"
+    WORKER_METRICS_ADDR: ":9465"
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  postgres: { cpus: "${PG_CPUS:-2}" }
+  redis: { cpus: "${REDIS_CPUS:-1}" }
+
+  api:
+    <<: *backend
+    command: [/app/api]
+    cpus: "${API_CPUS:-0.5}"
+    stop_grace_period: 15s
+    ports: ["127.0.0.1:19470-19479:9464"]
+
+  worker:
+    <<: *backend
+    command: [/app/worker]
+    cpus: "0.5"
+    environment:
+      <<: *env
+      DB_MAX_CONNS: "10"
+      DATABASE_URL: postgres://racego:racego@postgres:5432/racego_loadtest?sslmode=disable
+    ports: ["127.0.0.1:19480-19483:9465"]
+
+  lb:
+    image: nginx:1.29-alpine
+    cpus: "1"
+    volumes: ["./loadtest/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    ulimits: { nofile: 65536 }
+    ports: ["127.0.0.1:18080:80"]
+    depends_on: [api]
+
+  pgbouncer:
+    profiles: [pgbouncer]
+    image: edoburu/pgbouncer:latest@sha256:8638aa563607256d3c7440437534195f1066a92b68015d89ae9d6b935b444a6d
+    cpus: "0.5"
+    environment:
+      DB_HOST: postgres
+      DB_USER: racego
+      DB_PASSWORD: racego
+      DB_NAME: "*"
+      LISTEN_PORT: "6432"
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_POOL:-20}
+      MAX_CLIENT_CONN: "1000"
+      # pgx memakai prepared statement bernama: PgBouncer >= 1.21 melacaknya di mode transaction bila nilai ini > 0.
+      MAX_PREPARED_STATEMENTS: "200"
+    ports: ["127.0.0.1:16432:6432"]
+    depends_on:
+      postgres: { condition: service_healthy }

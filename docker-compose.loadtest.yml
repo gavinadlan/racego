@@ -12,7 +12,8 @@ services:
       POSTGRES_PASSWORD: racego
       POSTGRES_DB: racego_loadtest
     # pg_stat_statements: mencari kueri panas saat penyetelan (hanya di sini, bukan di produksi).
-    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all"]
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all",
+      "-c", "max_connections=${PG_MAX_CONNECTIONS:-100}"]
     ports:
       - "127.0.0.1:55439:5432"
     volumes:
